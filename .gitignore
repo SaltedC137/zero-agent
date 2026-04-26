@@ -1,0 +1,115 @@
+# 编译生成的文件和目录
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+build/
+dist/
+target/
+cmake-build-*/
+out/
+bin/
+obj/
+
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.vs/
+*.user
+*.suo
+*.sln.docstates
+.cache
+
+# 依赖目录
+node_modules/
+vendor/
+packages/
+bower_components/
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# 备份文件
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*py.class
+*.egg-info/
+.eggs/
+venv/
+.venv/
+ENV/
+env/
+*.pt
+*.pth
+*.pnnx.*
+*.ncnn.*
+
+# C/C++
+*.d
+*.pdb
+
+
+# Java
+*.class
+*.jar
+*.war
+.gradle/
+build/
+
+# Go
+vendor/
+
+# Rust
+target/
+
+# Node.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 测试覆盖率
+coverage/
+.coverage
+htmlcov/
+
+# 环境变量文件
+.env
+.env.local
+
+# 多媒体文件（可选）
+# *.mp4
+# *.avi
+# *.mkv
+# *.mp3
+# *.wav
+
+# 文档（可选）
+# docs/_build/
+
+#doxygen
+html
+latex
+
+#command line interface tool
+.qwen
+.history
+
+
