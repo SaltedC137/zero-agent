@@ -51,6 +51,7 @@ class Model;
 
 class ModelWeight {
   friend class Model;
+  
 
 public:
   static std::shared_ptr<ModelWeight> create(const std::string &model_path);
@@ -64,6 +65,10 @@ public:
 
   [[nodiscard]] llama_model *get_model() const { return model_; }
 
+  [[nodiscard]] common_chat_templates *get_templates() const {
+    return templates_.get();
+  }
+
   [[nodiscard]] const llama_vocab *get_vocab() const {
     if (model_ == nullptr) {
       return nullptr;
@@ -74,6 +79,7 @@ public:
 private:
   ModelWeight() = default;
   llama_model *model_ = nullptr;
+  std::shared_ptr<common_chat_templates> templates_;
 };
 
 // class model
@@ -115,7 +121,39 @@ public:
   // tokenized
   std::vector<llama_token> tokenize(const std::string &prompt) const;
 
+  [[nodiscard]] common_chat_templates *get_templates() const {
+    return weight_->get_templates();
+  }
 
+  [[nodiscard]] const llama_vocab *get_vocab() const {
+    return weight_->get_vocab();
+  }
+
+  [[nodiscard]] llama_context *get_context() const { return context_; }
+
+  [[nodiscard]] std::shared_ptr<ModelWeight> get_weight() const {
+    return weight_;
+  }
+
+  bool save_cache(const std::string &cache_path);
+
+  std::vector<llama_token> load_cache(const std::string &cache_path);
+
+private:
+  void set_cache(const std::vector<llama_token> &tokens) {
+    processed_tokens_ = tokens;
+    n_past_ = static_cast<int>(tokens.size());
+  }
+  Model() = default;
+
+  void initialize_context(const ModelConfig &model_config);
+
+  std::shared_ptr<ModelWeight> weight_;
+  common_chat_templates *templates_ = nullptr;
+  llama_context *context_ = nullptr;
+  int n_past_ = 0;
+  std::vector<llama_token> processed_tokens_;
+  ModelConfig config_;
 };
 
 } // namespace zota

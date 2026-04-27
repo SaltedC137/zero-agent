@@ -13,7 +13,6 @@
 #pragma once
 #include <functional>
 #include <llama.h>
-#include <map>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -52,8 +51,9 @@ inline std::string role_to_string(MessageRole role) {
     return "system";
   case MessageRole::TOOL:
     return "tool";
+  default:
+    return "user";
   }
-  return "user";
 }
 
 // This file defines the common_chat_msg struct, which is used to represent a
@@ -99,7 +99,7 @@ struct common_chat_msg_content_part {
 
 /**
  * @brief The common_chat_msg struct represents a message in a chat
- * conversation. It can
+ * conversation. It can contain text, tool calls, and reasoning content.
  *
  */
 
@@ -267,11 +267,13 @@ inline common_chat_msg make_tool_msg(const std::string &tool_call_id,
 inline std::string format_chatml(const std::vector<common_chat_msg> &messages) {
   std::string prompt;
   for (const auto &msg : messages) {
-    prompt += "<|im_start|>" + role_to_string(msg.role) + "\n";
-    prompt += msg.content + "\n";
-    prompt += "<|im_end|>\n";
+    if (!msg.content.empty()) {
+      prompt += "<|im_start|>" + role_to_string(msg.role) + "\n";
+      prompt += msg.content + "\n";
+      prompt += "<|im_end|>\n";
+    }
   }
-  prompt += "<|im_start|>assistant\n";
+  prompt += "<|im_start|>" + role_to_string(MessageRole::ASSISTANT) + "\n";
   return prompt;
 }
 
@@ -291,9 +293,11 @@ inline std::string format_alpaca(const std::vector<common_chat_msg> &messages) {
 inline std::string format_simple(const std::vector<common_chat_msg> &messages) {
   std::string prompt;
   for (const auto &msg : messages) {
-    prompt += role_to_string(msg.role) + ": " + msg.content + "\n";
+    if (!msg.content.empty()) {
+      prompt += role_to_string(msg.role) + ": " + msg.content + "\n";
+    }
   }
-  prompt += "assistant: ";
+  prompt += role_to_string(MessageRole::ASSISTANT) + ": ";
   return prompt;
 }
 
