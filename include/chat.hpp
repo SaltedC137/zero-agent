@@ -358,4 +358,32 @@ extract_tool_calls(const std::vector<common_chat_msg> &messages) {
   return {};
 }
 
+// auto detect chat template from model meta and initialize the
+// common_chat_templates
+
+inline common_chat_templates
+common_chat_templates_init(const llama_model *model) {
+  if (model == nullptr) {
+    return {.name = "chatml", .format_func = format_chatml};
+  }
+
+  int buf_size =
+      llama_model_meta_val_str(model, "tokenizer.chat_template", nullptr, 0);
+  if (buf_size <= 0) {
+    return {.name = "chatml", .format_func = format_chatml};
+  }
+
+  std::string chat_template(buf_size, '\0');
+  llama_model_meta_val_str(model, "tokenizer.chat_template", &chat_template[0],
+                           buf_size);
+
+  if (chat_template.find("chatml") != std::string::npos) {
+    return {.name = "chatml", .format_func = format_chatml};
+  } else if (chat_template.find("alpaca") != std::string::npos) {
+    return {.name = "alpaca", .format_func = format_alpaca};
+  }
+
+  return {.name = "simple", .format_func = format_simple};
+}
+
 } // namespace zota

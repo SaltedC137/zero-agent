@@ -51,7 +51,6 @@ class Model;
 
 class ModelWeight {
   friend class Model;
-  
 
 public:
   static std::shared_ptr<ModelWeight> create(const std::string &model_path);
@@ -99,7 +98,8 @@ public:
   /// @param config The model configuration
 
   static std::shared_ptr<Model>
-      create_with_weight(std::shared_ptr<ModelWeight>);
+  create_with_weight(std::shared_ptr<ModelWeight>,
+                     const ModelConfig &config = ModelConfig{});
 
   ~Model();
 
