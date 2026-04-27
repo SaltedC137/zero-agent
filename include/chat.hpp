@@ -49,22 +49,21 @@ struct common_chat_msg {
   std::string content;
   std::vector<common_chat_msg_content_part> content_parts;
   std::vector<common_chat_tool_call> tool_calls;
-  std::string response_content;
-  std::string tool_name;
+  std::string reasoning_content;
   std::string tool_call_id;
 
   bool empty() const {
     return role.empty() && content.empty() && content_parts.empty() &&
-           tool_calls.empty() && response_content.empty() &&
-           tool_name.empty() && tool_call_id.empty();
+           tool_calls.empty() && reasoning_content.empty() &&
+           tool_call_id.empty();
   }
 
   bool operator==(const common_chat_msg &other) const {
     return role == other.role && content == other.content &&
            content_parts == other.content_parts &&
            tool_calls == other.tool_calls &&
-           response_content == other.response_content &&
-           tool_name == other.tool_name && tool_call_id == other.tool_call_id;
+           reasoning_content == other.reasoning_content &&
+           tool_call_id == other.tool_call_id;
   }
 
   bool operator!=(const common_chat_msg &other) const {
@@ -87,11 +86,8 @@ struct common_chat_msg {
         j["tool_calls"].push_back(call.to_json());
       }
     }
-    if (!response_content.empty()) {
-      j["response_content"] = response_content;
-    }
-    if (!tool_name.empty()) {
-      j["tool_name"] = tool_name;
+    if (!reasoning_content.empty()) {
+      j["reasoning_content"] = reasoning_content;
     }
     if (!tool_call_id.empty()) {
       j["tool_call_id"] = tool_call_id;
@@ -115,11 +111,8 @@ struct common_chat_msg {
         msg.tool_calls.push_back(common_chat_tool_call::from_json(call));
       }
     }
-    if (j.contains("response_content")) {
-      msg.response_content = j.at("response_content").get<std::string>();
-    }
-    if (j.contains("tool_name")) {
-      msg.tool_name = j.at("tool_name").get<std::string>();
+    if (j.contains("reasoning_content")) {
+      msg.reasoning_content = j.at("reasoning_content").get<std::string>();
     }
     if (j.contains("tool_call_id")) {
       msg.tool_call_id = j.at("tool_call_id").get<std::string>();
@@ -134,4 +127,58 @@ struct common_chat_tool_param {
   std::string name;
   std::string type;
   std::string description;
+  bool required = false;
 };
+
+struct common_chat_tool {
+  std::string name;
+  std::string description;
+  std::vector<common_chat_tool_param> params;
+
+  json to_json_schema() const {
+    json props = json::object();
+    json required = json::array();
+
+    for (const auto &param : params) {
+      props[param.name] = {{"type", param.type},
+                           {"description", param.description}};
+      if (param.required) {
+        required.push_back(param.name);
+      }
+    }
+
+    return json{
+        {"name", name},
+        {"description", description},
+        {"parameters",
+         {{"type", "object"}, {"properties", props}, {"required", required}}}};
+  }
+};
+
+// message manager is used to manage the messages in a chat conversation
+
+struct common_chat_msg_diff {
+  std::string content_delta;
+  std::string reasoning_content_delta;
+  size_t tool_call_index = static_cast<size_t>(-1);
+  common_chat_tool_call tool_call;
+};
+
+inline common_chat_msg make_user_msg(const std::string &content) {
+  return {.role = "user", .content = content};
+}
+
+inline common_chat_msg make_assistant_msg(const std::string &content) {
+  return {.role = "assistant", .content = content};
+}
+
+inline common_chat_msg make_system_msg(const std::string &content) {
+  return {.role = "system", .content = content};
+}
+
+inline common_chat_msg make_tool_msg(const std::string &tool_call_id,
+                                     const std::string &result) {
+  return {.role = "tool",
+          .content = result,
+          .tool_call_id = tool_call_id};
+}
