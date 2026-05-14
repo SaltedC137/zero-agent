@@ -19,7 +19,7 @@
 
 using json = nlohmann::json;
 
-namespace zota {
+namespace zato {
 
 enum class MessageRole { USER, ASSISTANT, SYSTEM, TOOL };
 
@@ -386,4 +386,4 @@ common_chat_templates_init(const llama_model *model) {
   return {.name = "simple", .format_func = format_simple};
 }
 
-} // namespace zota
+} // namespace zato

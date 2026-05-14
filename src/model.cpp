@@ -14,7 +14,7 @@
 
 // class model weight
 
-namespace zota {
+namespace zato {
 
 std::shared_ptr<ModelWeight>
 ModelWeight::create(const std::string &model_path) {
@@ -22,19 +22,16 @@ ModelWeight::create(const std::string &model_path) {
   // load model
   ggml_backend_load_all();
 
-
-
   llama_model_params model_params = llama_model_default_params();
 
   model_params.n_gpu_layers = 999; // Use CPU for all layers by default
-  model_params.main_gpu = 0; // Use GPU 0 for offloading if needed
+  model_params.main_gpu = 0;       // Use GPU 0 for offloading if needed
 
   weight->model_ = llama_model_load_from_file(model_path.c_str(), model_params);
 
   if (weight->model_ == nullptr) {
     throw ModelError("Failed to load model from path: " + model_path);
   }
-
 
   auto tmpls = common_chat_templates_init(weight->model_);
 
@@ -169,9 +166,9 @@ std::vector<llama_token> Model::tokenize(const std::string &prompt) const {
     throw ModelError("Vocabulary is not available");
   }
 
-  int32_t required = llama_tokenize(vocab, prompt.c_str(),
-                                    static_cast<int32_t>(prompt.size()), nullptr,
-                                    0, true, true);
+  int32_t required =
+      llama_tokenize(vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
+                     nullptr, 0, true, true);
   if (required == INT32_MIN) {
     throw ModelError("Tokenization overflow");
   }
@@ -180,9 +177,9 @@ std::vector<llama_token> Model::tokenize(const std::string &prompt) const {
   }
 
   std::vector<llama_token> tokens(static_cast<size_t>(required));
-  int32_t actual = llama_tokenize(vocab, prompt.c_str(),
-                                  static_cast<int32_t>(prompt.size()),
-                                  tokens.data(), required, true, true);
+  int32_t actual =
+      llama_tokenize(vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
+                     tokens.data(), required, true, true);
   if (actual < 0) {
     throw ModelError("Failed to tokenize prompt");
   }
@@ -239,10 +236,7 @@ Model::generate_from_token(const std::vector<llama_token> &all_tokens,
   constexpr int max_new_tokens = 4096;
   constexpr size_t max_output_chars = 12000;
   const std::vector<std::string> stop_sequences = {
-      "<|im_end|>",
-      "<|endoftext|>",
-      "[END_OF_TEXT]",
-      "\n**Created Question**",
+      "<|im_end|>", "<|endoftext|>", "[END_OF_TEXT]", "\n**Created Question**",
       "\nCreated Question"};
   std::string output;
   output.reserve(2048);
@@ -263,7 +257,8 @@ Model::generate_from_token(const std::vector<llama_token> &all_tokens,
     for (const auto &stop : stop_sequences) {
       size_t pos = output.find(stop);
       if (pos != std::string::npos) {
-        stop_pos = stop_pos == std::string::npos ? pos : std::min(stop_pos, pos);
+        stop_pos =
+            stop_pos == std::string::npos ? pos : std::min(stop_pos, pos);
       }
     }
 
@@ -304,8 +299,68 @@ common_chat_msg Model::generate(const std::vector<common_chat_msg> &messages,
     return make_assistant_msg("");
   }
 
-  std::string prompt =
-      templates_ != nullptr ? templates_->apply(messages) : format_chatml(messages);
+  std::string prompt;
+
+  const llama_model *model =
+      weight_ != nullptr ? weight_->get_model() : nullptr;
+  if (model != nullptr) {
+    int tmpl_len =
+        llama_model_meta_val_str(model, "tokenizer.chat_template", nullptr, 0);
+    if (tmpl_len > 0) {
+      std::string tmpl(static_cast<size_t>(tmpl_len), '\0');
+      llama_model_meta_val_str(model, "tokenizer.chat_template", tmpl.data(),
+                               tmpl_len);
+
+      std::vector<std::string> roles;
+      std::vector<std::string> contents;
+      roles.reserve(messages.size());
+      contents.reserve(messages.size());
+
+      std::vector<llama_chat_message> chat_messages;
+      chat_messages.reserve(messages.size());
+
+      for (const auto &msg : messages) {
+        roles.push_back(role_to_string(msg.role));
+        contents.push_back(msg.content);
+      }
+
+      for (size_t i = 0; i < roles.size(); ++i) {
+        chat_messages.push_back({roles[i].c_str(), contents[i].c_str()});
+      }
+
+      int32_t needed =
+          llama_chat_apply_template(tmpl.c_str(), chat_messages.data(),
+                                    chat_messages.size(), true, nullptr, 0);
+
+      if (needed > 0) {
+        std::string rendered(static_cast<size_t>(needed) + 1, '\0');
+        int32_t written = llama_chat_apply_template(
+            tmpl.c_str(), chat_messages.data(), chat_messages.size(), true,
+            rendered.data(), static_cast<int32_t>(rendered.size()));
+
+        if (written > static_cast<int32_t>(rendered.size())) {
+          rendered.resize(static_cast<size_t>(written) + 1);
+          written = llama_chat_apply_template(
+              tmpl.c_str(), chat_messages.data(), chat_messages.size(), true,
+              rendered.data(), static_cast<int32_t>(rendered.size()));
+        }
+
+        if (written > 0) {
+          rendered.resize(static_cast<size_t>(written));
+          if (!rendered.empty() && rendered.back() == '\0') {
+            rendered.pop_back();
+          }
+          prompt = std::move(rendered);
+        }
+      }
+    }
+  }
+
+  if (prompt.empty()) {
+    prompt = templates_ != nullptr ? templates_->apply(messages)
+                                   : format_chatml(messages);
+  }
+
   auto tokens = tokenize(prompt);
   auto text = generate_from_token(tokens, callback);
   return make_assistant_msg(text);
@@ -341,4 +396,4 @@ std::vector<llama_token> Model::load_cache(const std::string &cache_path) {
   set_cache(tokens);
   return tokens;
 }
-} // namespace zota
+} // namespace zato

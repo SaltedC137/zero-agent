@@ -16,7 +16,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace zota {
+namespace zato {
 
 // Base error class for all errors in the library
 class Error : public std::runtime_error {
@@ -80,4 +80,4 @@ public:
   [[nodiscard]] const std::string &get_message() const { return message_; }
 };
 
-} // namespace zota
+} // namespace zato

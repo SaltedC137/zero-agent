@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace zota {
+namespace zato {
 
 // Trim leading and trailing whitespace from a string.
 std::string trim(const std::string &text) {
@@ -24,7 +24,7 @@ std::string trim(const std::string &text) {
 std::string load_system_prompt_file(const std::string &path) {
   std::ifstream file(path);
   if (!file.is_open()) {
-    throw zota::Error("Failed to open system prompt file: " + path);
+    throw zato::Error("Failed to open system prompt file: " + path);
   }
 
   std::string content((std::istreambuf_iterator<char>(file)),
@@ -43,12 +43,12 @@ std::string load_system_prompt_file(const std::string &path) {
   return content;
 }
 
-} // namespace zota
+} // namespace zato
 
 int main(int argc, char **argv) {
   const std::string model_path =
       argc > 1 ? argv[1] : "model/Qwen2.5-Coder-3B-Instruct-Q8_0.gguf";
-  std::string system_prompt_path;
+  std::string system_prompt_path = "prompt/Qwen_artifacts_20250501.md";
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
   }
 
   try {
-    zota::ModelConfig config;
+    zato::ModelConfig config;
     config.temp = 0.0f;
     config.top_k = 1;
     config.max_p = 1.0f;
@@ -66,26 +66,14 @@ int main(int argc, char **argv) {
     config.n_ctx = 32768;
     config.n_batch = 2048;
 
-    auto model = zota::Model::create(model_path, config);
+    auto model = zato::Model::create(model_path, config);
 
     std::cout << "Zero-Agent gym ready. Model: " << model_path << std::endl;
     std::cout << "Type 'exit' to quit." << std::endl;
 
-    std::vector<zota::common_chat_msg> messages;
-    const std::string default_system_prompt =
-        R"(You are Qwen, a professional coding assistant
-created by Alibaba Cloud. You are proficient in many programming languages, frameworks, and
-tools. You specialize in code generation, debugging, optimization, and explanation. Your
-answers are accurate, concise, and focus on correctness, readability, and best practices. When
-responding, you first analyze the problem, then provide clear reasoning and code examples. If
-you are unsure or need more information, you will ask for clarification.)";
-
-    if (!system_prompt_path.empty()) {
-      messages.push_back(zota::make_system_msg(
-          zota::load_system_prompt_file(system_prompt_path)));
-    } else {
-      messages.push_back(zota::make_system_msg(default_system_prompt));
-    }
+    std::vector<zato::common_chat_msg> messages;
+    messages.push_back(zato::make_system_msg(
+        zato::load_system_prompt_file(system_prompt_path)));
 
     std::string user_input;
     while (true) {
@@ -100,8 +88,8 @@ you are unsure or need more information, you will ask for clarification.)";
         continue;
       }
 
-      messages.push_back(zota::make_user_msg(user_input));
-      std::vector<zota::common_chat_tool> tools;
+      messages.push_back(zato::make_user_msg(user_input));
+      std::vector<zato::common_chat_tool> tools;
 
       std::cout << "AI> " << std::flush;
       auto response =
@@ -112,7 +100,7 @@ you are unsure or need more information, you will ask for clarification.)";
 
       messages.push_back(response);
     }
-  } catch (const zota::Error &e) {
+  } catch (const zato::Error &e) {
     std::cerr << e.what() << std::endl;
     return 1;
   } catch (const std::exception &e) {
