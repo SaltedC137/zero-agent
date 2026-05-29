@@ -1,6 +1,8 @@
 #pragma once
 
 #include "chat.hpp"
+#include "tool_result.hpp"
+
 #include <llama.h>
 #include <string>
 
@@ -34,7 +36,7 @@ public:
 
   // Callbacks for tool execution. These can be used to modify the tool name and
 
-  virtual void after_tool_execution(std::string& tool_name, std::string& result)
+  virtual void after_tool_execution(std::string& tool_name, ToolResult& result)
   {
     (void)tool_name;
     (void)result;

@@ -1,6 +1,12 @@
 #include "agent.hpp"
+
 #include "chat.hpp"
+#include "error.hpp"
 #include "model.hpp"
+#include "tool.hpp"
+#include "tool_result.hpp"
+
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -140,7 +146,6 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
       tool_msg.role = MessageRole::TOOL;
       tool_msg.content = result.output();
       tool_msg.tool_call_id = tool_call.tool_call_id;
-      tool_msg.tool_name = tool_name;
       messages.push_back(tool_msg);
     }
   }

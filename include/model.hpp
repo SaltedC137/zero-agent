@@ -40,10 +40,14 @@ struct ModelConfig
   int n_ctx = 10240;
   int n_batch = -1;
 
-  int n_threads =
-    static_cast<int>(std::max(1u, std::thread::hardware_concurrency() - 1));
-  int n_threads_batch =
-    static_cast<int>(std::max(1u, std::thread::hardware_concurrency() - 1));
+  static int default_threads() {
+    const unsigned hc = std::thread::hardware_concurrency();
+    const unsigned base = hc > 1 ? (hc - 1) : 1;
+    return static_cast<int>(std::max(1u, base));
+  }
+
+  int n_threads = default_threads();
+  int n_threads_batch = default_threads();
 
   ggml_type cache_type_k = GGML_TYPE_F16;
   ggml_type cache_type_v = GGML_TYPE_F16;

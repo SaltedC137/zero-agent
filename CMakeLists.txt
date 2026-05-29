@@ -49,6 +49,8 @@ endif()
 add_executable(${PROJECT_NAME}
   src/gym.cpp
   src/model.cpp
+  src/agent.cpp
+  src/tool.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE

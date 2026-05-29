@@ -47,8 +47,10 @@ private:
 public:
   explicit ToolError(const std::string& tool_name, const std::string& msg)
     : Error("Tool Error: " + tool_name + ": " + msg)
+    , tool_name_(tool_name)
   {
   }
+
   [[nodiscard]] const std::string& get_tool_name() const { return tool_name_; }
 };
 

@@ -1,65 +1,51 @@
+#include "agent.hpp"
 #include "chat.hpp"
 #include "error.hpp"
 #include "model.hpp"
+#include "tool.hpp"
 
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
-namespace zato {
-
-// Trim leading and trailing whitespace from a string.
-std::string
-trim(const std::string& text)
-{
-  const auto begin = text.find_first_not_of(" \t\r\n");
-  if (begin == std::string::npos) {
-    return "";
-  }
-
-  const auto end = text.find_last_not_of(" \t\r\n");
-  return text.substr(begin, end - begin + 1);
-}
-
-std::string
-load_system_prompt_file(const std::string& path)
-{
-  std::ifstream file(path);
-  if (!file.is_open()) {
-    throw zato::Error("Failed to open system prompt file: " + path);
-  }
-
-  std::string content((std::istreambuf_iterator<char>(file)),
-                      std::istreambuf_iterator<char>());
-  content = trim(content);
-
-  const std::size_t begin = content.find("~~~");
-  const std::size_t end = content.rfind("~~~");
-  if (begin != std::string::npos && end != std::string::npos && end > begin) {
-    const std::size_t line_begin = content.find('\n', begin);
-    if (line_begin != std::string::npos) {
-      return trim(content.substr(line_begin + 1, end - line_begin - 1));
-    }
-  }
-
-  return content;
-}
-
-} // namespace zato
 
 int
 main(int argc, char** argv)
 {
-  const std::string model_path =
-    argc > 1 ? argv[1] : "model/Qwen2.5-Coder-3B-Instruct-Q8_0.gguf";
+  const std::string default_model_path =
+    "model/Qwen2.5-Coder-3B-Instruct-Q8_0.gguf";
+  std::string model_path = default_model_path;
+  bool model_path_set = false;
+
   std::string system_prompt_path = "prompt/Qwen_artifacts_20250501.md";
+  bool use_agent = false;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
+
     if (arg == "--system-prompt" && i + 1 < argc) {
       system_prompt_path = argv[++i];
+      continue;
+    }
+
+    if (arg == "--agent") {
+      use_agent = true;
+      continue;
+    }
+
+    // Unknown flags are ignored for now.
+    if (arg.rfind("--", 0) == 0) {
+      continue;
+    }
+
+    // First positional argument is treated as the model path.
+    if (!model_path_set) {
+      model_path = arg;
+      model_path_set = true;
+      continue;
     }
   }
 
@@ -78,8 +64,22 @@ main(int argc, char** argv)
     std::cout << "Type 'exit' to quit." << std::endl;
 
     std::vector<zato::common_chat_msg> messages;
-    messages.push_back(
-      zato::make_system_msg(zato::load_system_prompt_file(system_prompt_path)));
+    std::unique_ptr<zato::Agent> agent;
+
+    if (use_agent) {
+      std::vector<std::unique_ptr<zato::Tool>> tools;
+      tools.push_back(std::make_unique<EchoTool>());
+      tools.push_back(std::make_unique<AddTool>());
+
+      agent = std::make_unique<zato::Agent>(
+          model,
+          std::move(tools),
+          std::vector<std::unique_ptr<zato::Callback>>{},
+          zato::load_system_prompt_file(system_prompt_path));
+    } else {
+      messages.push_back(zato::make_system_msg(
+          zato::load_system_prompt_file(system_prompt_path)));
+    }
 
     std::string user_input;
     while (true) {
@@ -95,16 +95,23 @@ main(int argc, char** argv)
       }
 
       messages.push_back(zato::make_user_msg(user_input));
-      std::vector<zato::common_chat_tool> tools;
 
-      std::cout << "AI> " << std::flush;
-      auto response =
-        model->generate(messages, tools, [](const std::string& delta) {
-          std::cout << delta << std::flush;
-        });
-      std::cout << std::endl;
+      if (use_agent) {
+        std::cout << "AI> " << std::flush;
+        const std::string response = agent->run_loop(messages, nullptr);
+        std::cout << response << std::endl;
+      } else {
+        std::vector<zato::common_chat_tool> tools;
 
-      messages.push_back(response);
+        std::cout << "AI> " << std::flush;
+        auto response =
+            model->generate(messages, tools, [](const std::string &delta) {
+              std::cout << delta << std::flush;
+            });
+        std::cout << std::endl;
+
+        messages.push_back(response);
+      }
     }
   } catch (const zato::Error& e) {
     std::cerr << e.what() << std::endl;

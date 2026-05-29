@@ -1,20 +1,105 @@
 #include "model.hpp"
 #include "chat.hpp"
 #include "error.hpp"
+#include "tool.hpp"
 
 #include <algorithm>
-#include <climits>
-#include <cmath>
 #include <cstdint>
 #include <ggml-backend.h>
 #include <llama.h>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 // class model weight
 
 namespace zato {
+
+static std::string trim_copy(const std::string &s) {
+  const auto begin = s.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos) {
+    return "";
+  }
+  const auto end = s.find_last_not_of(" \t\r\n");
+  return s.substr(begin, end - begin + 1);
+}
+
+static std::string strip_code_fence_json(const std::string &text) {
+  std::string t = trim_copy(text);
+  if (t.rfind("```", 0) != 0) {
+    return t;
+  }
+  const auto first_nl = t.find('\n');
+  if (first_nl == std::string::npos) {
+    return t;
+  }
+  const auto last_fence = t.rfind("```");
+  if (last_fence == std::string::npos || last_fence <= first_nl) {
+    return t;
+  }
+  return trim_copy(t.substr(first_nl + 1, last_fence - first_nl - 1));
+}
+
+static std::optional<common_chat_msg>
+try_parse_tool_call_message(const std::string &text) {
+  std::string t = strip_code_fence_json(text);
+  t = trim_copy(t);
+
+  if (t.empty() || t.front() != '{') {
+    return std::nullopt;
+  }
+
+  try {
+    json j = json::parse(t);
+    if (!j.is_object() || !j.contains("tool_calls") || !j["tool_calls"].is_array()) {
+      return std::nullopt;
+    }
+
+    common_chat_msg msg;
+    msg.role = MessageRole::ASSISTANT;
+
+    if (j.contains("content") && j["content"].is_string()) {
+      msg.content = j["content"].get<std::string>();
+    }
+
+    const auto &calls = j["tool_calls"];
+    msg.tool_calls.reserve(calls.size());
+
+    for (size_t i = 0; i < calls.size(); ++i) {
+      const auto &c = calls.at(i);
+      if (!c.is_object() || !c.contains("tool_name")) {
+        continue;
+      }
+
+      common_chat_tool_call call;
+      call.tool_name = c.at("tool_name").get<std::string>();
+
+      if (c.contains("tool_args")) {
+        const auto &args = c.at("tool_args");
+        call.tool_args = args.is_string() ? args.get<std::string>() : args.dump();
+      } else {
+        call.tool_args = "{}";
+      }
+
+      if (c.contains("tool_call_id") && c.at("tool_call_id").is_string()) {
+        call.tool_call_id = c.at("tool_call_id").get<std::string>();
+      } else {
+        call.tool_call_id = "call_" + std::to_string(i);
+      }
+
+      msg.tool_calls.push_back(std::move(call));
+    }
+
+    if (msg.tool_calls.empty()) {
+      return std::nullopt;
+    }
+
+    return msg;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
 
 std::shared_ptr<ModelWeight>
 ModelWeight::create(const std::string& model_path)
@@ -319,7 +404,7 @@ Model::generate_from_token(const std::vector<llama_token>& all_tokens,
 
 common_chat_msg
 Model::generate(const std::vector<common_chat_msg>& messages,
-                const std::vector<common_chat_tool>& /*tools*/,
+                const std::vector<common_chat_tool>& tools,
                 ResponseCallback callback)
 {
   if (messages.empty()) {
@@ -394,13 +479,36 @@ Model::generate(const std::vector<common_chat_msg>& messages,
     }
   }
 
+
+  std::vector<common_chat_msg> augmented = messages;
+  if (!tools.empty()) {
+    json tool_schemas = json::array();
+    for (const auto &t : tools) {
+      tool_schemas.push_back(t.to_json_schema());
+    }
+
+    std::string tool_instruction =
+        "You may call tools when needed. If you decide to call a tool, respond ONLY with a JSON object of the form:\n"
+        "{\"tool_calls\":[{\"tool_name\":\"...\",\"tool_args\":{...},\"tool_call_id\":\"...\"}],\"content\":\"\"}.\n"
+        "If no tool is needed, respond normally with plain text.\n\n"
+        "Available tools (JSON schema):\n" +
+        tool_schemas.dump();
+
+    augmented.push_back(make_system_msg(tool_instruction));
+  }
+
   if (prompt.empty()) {
-    prompt = templates_ != nullptr ? templates_->apply(messages)
-                                   : format_chatml(messages);
+    prompt = templates_ != nullptr ? templates_->apply(augmented)
+                                   : format_chatml(augmented);
   }
 
   auto tokens = tokenize(prompt);
   auto text = generate_from_token(tokens, callback);
+
+  if (auto parsed = try_parse_tool_call_message(text)) {
+    return *parsed;
+  }
+
   return make_assistant_msg(text);
 }
 
