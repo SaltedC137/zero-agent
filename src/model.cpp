@@ -17,15 +17,16 @@
 namespace zato {
 
 std::shared_ptr<ModelWeight>
-ModelWeight::create(const std::string &model_path) {
+ModelWeight::create(const std::string& model_path)
+{
   std ::shared_ptr<ModelWeight> weight(new ModelWeight());
   // load model
   ggml_backend_load_all();
 
   llama_model_params model_params = llama_model_default_params();
 
-  model_params.n_gpu_layers = 999; // Use CPU for all layers by default
-  model_params.main_gpu = 0;       // Use GPU 0 for offloading if needed
+  model_params.n_gpu_layers = 999;
+  model_params.main_gpu = 0; // Use GPU 0 for offloading if needed
 
   weight->model_ = llama_model_load_from_file(model_path.c_str(), model_params);
 
@@ -44,29 +45,33 @@ ModelWeight::create(const std::string &model_path) {
   return weight;
 }
 
-ModelWeight::~ModelWeight() {
+ModelWeight::~ModelWeight()
+{
   if (model_ != nullptr) {
     llama_model_free(model_);
     model_ = nullptr;
   }
 }
 
-std::shared_ptr<Model> Model::create(const std::string &model_path,
-                                     const ModelConfig &config) {
+std::shared_ptr<Model>
+Model::create(const std::string& model_path, const ModelConfig& config)
+{
   auto weights = ModelWeight::create(model_path);
   return create_with_weight(std::move(weights), config);
 }
 
 std::shared_ptr<Model>
 Model::create_with_weight(std::shared_ptr<ModelWeight> weight,
-                          const ModelConfig &model_config) {
+                          const ModelConfig& model_config)
+{
   std::shared_ptr<Model> model(new Model());
   model->weight_ = std::move(weight);
   model->initialize_context(model_config);
   return model;
 }
 
-Model::~Model() {
+Model::~Model()
+{
   if (sampler_ != nullptr) {
     llama_sampler_free(sampler_);
   }
@@ -76,18 +81,23 @@ Model::~Model() {
   // weights_ is automatically released when ref count drops to zero
 }
 
-Model::Model(Model &&other) noexcept
-    : weight_(std::move(other.weight_)), context_(other.context_),
-      sampler_(other.sampler_),
-      processed_tokens_(std::move(other.processed_tokens_)),
-      n_past_(other.n_past_), config_(other.config_) {
+Model::Model(Model&& other) noexcept
+  : weight_(std::move(other.weight_))
+  , context_(other.context_)
+  , sampler_(other.sampler_)
+  , processed_tokens_(std::move(other.processed_tokens_))
+  , n_past_(other.n_past_)
+  , config_(other.config_)
+{
 
   other.context_ = nullptr;
   other.sampler_ = nullptr;
   other.n_past_ = 0;
 }
 
-Model &Model::operator=(Model &&other) noexcept {
+Model&
+Model::operator=(Model&& other) noexcept
+{
   if (this == &other) {
     return *this;
   }
@@ -117,7 +127,9 @@ Model &Model::operator=(Model &&other) noexcept {
   return *this;
 }
 
-void Model::initialize_context(const ModelConfig &model_config) {
+void
+Model::initialize_context(const ModelConfig& model_config)
+{
   if (!weight_ || weight_->get_model() == nullptr) {
     throw ModelError("Model weight is not initialized");
   }
@@ -128,8 +140,8 @@ void Model::initialize_context(const ModelConfig &model_config) {
   llama_context_params ctx_params = llama_context_default_params();
   ctx_params.n_ctx = static_cast<uint32_t>(std::max(1, model_config.n_ctx));
   ctx_params.n_batch = static_cast<uint32_t>(
-      model_config.n_batch > 0 ? model_config.n_batch
-                               : std::min(model_config.n_ctx, 1024));
+    model_config.n_batch > 0 ? model_config.n_batch
+                             : std::min(model_config.n_ctx, 1024));
   ctx_params.n_threads = std::max(1, model_config.n_threads);
   ctx_params.n_threads_batch = std::max(1, model_config.n_threads_batch);
   ctx_params.type_k = model_config.cache_type_k;
@@ -156,19 +168,25 @@ void Model::initialize_context(const ModelConfig &model_config) {
   llama_sampler_chain_add(sampler_, llama_sampler_init_dist(config_.seed));
 }
 
-std::vector<llama_token> Model::tokenize(const std::string &prompt) const {
+std::vector<llama_token>
+Model::tokenize(const std::string& prompt) const
+{
   if (prompt.empty()) {
     return {};
   }
 
-  const llama_vocab *vocab = get_vocab();
+  const llama_vocab* vocab = get_vocab();
   if (vocab == nullptr) {
     throw ModelError("Vocabulary is not available");
   }
 
-  int32_t required =
-      llama_tokenize(vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
-                     nullptr, 0, true, true);
+  int32_t required = llama_tokenize(vocab,
+                                    prompt.c_str(),
+                                    static_cast<int32_t>(prompt.size()),
+                                    nullptr,
+                                    0,
+                                    true,
+                                    true);
   if (required == INT32_MIN) {
     throw ModelError("Tokenization overflow");
   }
@@ -177,9 +195,13 @@ std::vector<llama_token> Model::tokenize(const std::string &prompt) const {
   }
 
   std::vector<llama_token> tokens(static_cast<size_t>(required));
-  int32_t actual =
-      llama_tokenize(vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),
-                     tokens.data(), required, true, true);
+  int32_t actual = llama_tokenize(vocab,
+                                  prompt.c_str(),
+                                  static_cast<int32_t>(prompt.size()),
+                                  tokens.data(),
+                                  required,
+                                  true,
+                                  true);
   if (actual < 0) {
     throw ModelError("Failed to tokenize prompt");
   }
@@ -189,13 +211,14 @@ std::vector<llama_token> Model::tokenize(const std::string &prompt) const {
 }
 
 std::string
-Model::generate_from_token(const std::vector<llama_token> &all_tokens,
-                           ResponseCallback callback) {
+Model::generate_from_token(const std::vector<llama_token>& all_tokens,
+                           ResponseCallback callback)
+{
   if (context_ == nullptr || sampler_ == nullptr) {
     throw ModelError("Model context is not initialized");
   }
 
-  const llama_vocab *vocab = get_vocab();
+  const llama_vocab* vocab = get_vocab();
   if (vocab == nullptr) {
     throw ModelError("Vocabulary is not available");
   }
@@ -206,7 +229,7 @@ Model::generate_from_token(const std::vector<llama_token> &all_tokens,
 
     while (true) {
       int32_t written =
-          llama_token_to_piece(vocab, token, buffer.data(), capacity, 0, true);
+        llama_token_to_piece(vocab, token, buffer.data(), capacity, 0, true);
       if (written >= 0) {
         return std::string(buffer.data(), static_cast<size_t>(written));
       }
@@ -226,7 +249,7 @@ Model::generate_from_token(const std::vector<llama_token> &all_tokens,
   if (!all_tokens.empty()) {
     std::vector<llama_token> prompt_tokens = all_tokens;
     auto prompt_batch = llama_batch_get_one(
-        prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
+      prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
     if (llama_decode(context_, prompt_batch) != 0) {
       throw ModelError("Failed to decode prompt tokens");
     }
@@ -235,9 +258,11 @@ Model::generate_from_token(const std::vector<llama_token> &all_tokens,
 
   constexpr int max_new_tokens = 4096;
   constexpr size_t max_output_chars = 12000;
-  const std::vector<std::string> stop_sequences = {
-      "<|im_end|>", "<|endoftext|>", "[END_OF_TEXT]", "\n**Created Question**",
-      "\nCreated Question"};
+  const std::vector<std::string> stop_sequences = { "<|im_end|>",
+                                                    "<|endoftext|>",
+                                                    "[END_OF_TEXT]",
+                                                    "\n**Created Question**",
+                                                    "\nCreated Question" };
   std::string output;
   output.reserve(2048);
 
@@ -254,11 +279,11 @@ Model::generate_from_token(const std::vector<llama_token> &all_tokens,
     output += piece;
 
     size_t stop_pos = std::string::npos;
-    for (const auto &stop : stop_sequences) {
+    for (const auto& stop : stop_sequences) {
       size_t pos = output.find(stop);
       if (pos != std::string::npos) {
         stop_pos =
-            stop_pos == std::string::npos ? pos : std::min(stop_pos, pos);
+          stop_pos == std::string::npos ? pos : std::min(stop_pos, pos);
       }
     }
 
@@ -292,24 +317,26 @@ Model::generate_from_token(const std::vector<llama_token> &all_tokens,
   return output;
 }
 
-common_chat_msg Model::generate(const std::vector<common_chat_msg> &messages,
-                                const std::vector<common_chat_tool> & /*tools*/,
-                                ResponseCallback callback) {
+common_chat_msg
+Model::generate(const std::vector<common_chat_msg>& messages,
+                const std::vector<common_chat_tool>& /*tools*/,
+                ResponseCallback callback)
+{
   if (messages.empty()) {
     return make_assistant_msg("");
   }
 
   std::string prompt;
 
-  const llama_model *model =
-      weight_ != nullptr ? weight_->get_model() : nullptr;
+  const llama_model* model =
+    weight_ != nullptr ? weight_->get_model() : nullptr;
   if (model != nullptr) {
     int tmpl_len =
-        llama_model_meta_val_str(model, "tokenizer.chat_template", nullptr, 0);
+      llama_model_meta_val_str(model, "tokenizer.chat_template", nullptr, 0);
     if (tmpl_len > 0) {
       std::string tmpl(static_cast<size_t>(tmpl_len), '\0');
-      llama_model_meta_val_str(model, "tokenizer.chat_template", tmpl.data(),
-                               tmpl_len);
+      llama_model_meta_val_str(
+        model, "tokenizer.chat_template", tmpl.data(), tmpl_len);
 
       std::vector<std::string> roles;
       std::vector<std::string> contents;
@@ -319,30 +346,41 @@ common_chat_msg Model::generate(const std::vector<common_chat_msg> &messages,
       std::vector<llama_chat_message> chat_messages;
       chat_messages.reserve(messages.size());
 
-      for (const auto &msg : messages) {
+      for (const auto& msg : messages) {
         roles.push_back(role_to_string(msg.role));
         contents.push_back(msg.content);
       }
 
       for (size_t i = 0; i < roles.size(); ++i) {
-        chat_messages.push_back({roles[i].c_str(), contents[i].c_str()});
+        chat_messages.push_back({ roles[i].c_str(), contents[i].c_str() });
       }
 
-      int32_t needed =
-          llama_chat_apply_template(tmpl.c_str(), chat_messages.data(),
-                                    chat_messages.size(), true, nullptr, 0);
+      int32_t needed = llama_chat_apply_template(tmpl.c_str(),
+                                                 chat_messages.data(),
+                                                 chat_messages.size(),
+                                                 true,
+                                                 nullptr,
+                                                 0);
 
       if (needed > 0) {
         std::string rendered(static_cast<size_t>(needed) + 1, '\0');
-        int32_t written = llama_chat_apply_template(
-            tmpl.c_str(), chat_messages.data(), chat_messages.size(), true,
-            rendered.data(), static_cast<int32_t>(rendered.size()));
+        int32_t written =
+          llama_chat_apply_template(tmpl.c_str(),
+                                    chat_messages.data(),
+                                    chat_messages.size(),
+                                    true,
+                                    rendered.data(),
+                                    static_cast<int32_t>(rendered.size()));
 
         if (written > static_cast<int32_t>(rendered.size())) {
           rendered.resize(static_cast<size_t>(written) + 1);
-          written = llama_chat_apply_template(
-              tmpl.c_str(), chat_messages.data(), chat_messages.size(), true,
-              rendered.data(), static_cast<int32_t>(rendered.size()));
+          written =
+            llama_chat_apply_template(tmpl.c_str(),
+                                      chat_messages.data(),
+                                      chat_messages.size(),
+                                      true,
+                                      rendered.data(),
+                                      static_cast<int32_t>(rendered.size()));
         }
 
         if (written > 0) {
@@ -366,28 +404,33 @@ common_chat_msg Model::generate(const std::vector<common_chat_msg> &messages,
   return make_assistant_msg(text);
 }
 
-bool Model::save_cache(const std::string &cache_path) {
+bool
+Model::save_cache(const std::string& cache_path)
+{
   if (context_ == nullptr) {
     throw ModelError("Cannot save cache: context is null");
   }
 
-  return llama_state_save_file(context_, cache_path.c_str(),
+  return llama_state_save_file(context_,
+                               cache_path.c_str(),
                                processed_tokens_.data(),
                                processed_tokens_.size());
 }
 
-std::vector<llama_token> Model::load_cache(const std::string &cache_path) {
+std::vector<llama_token>
+Model::load_cache(const std::string& cache_path)
+{
   if (context_ == nullptr) {
     throw ModelError("Cannot load cache: context is null");
   }
 
   size_t token_capacity =
-      static_cast<size_t>(std::max(4096, std::max(1, config_.n_ctx) * 4));
+    static_cast<size_t>(std::max(4096, std::max(1, config_.n_ctx) * 4));
   std::vector<llama_token> tokens(token_capacity);
   size_t token_count = 0;
 
-  bool ok = llama_state_load_file(context_, cache_path.c_str(), tokens.data(),
-                                  tokens.size(), &token_count);
+  bool ok = llama_state_load_file(
+    context_, cache_path.c_str(), tokens.data(), tokens.size(), &token_count);
   if (!ok) {
     throw ModelError("Failed to load cache from path: " + cache_path);
   }

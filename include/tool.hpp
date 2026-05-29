@@ -3,14 +3,14 @@
 #include <nlohmann/json.hpp>
 #include <string>
 
-
 #include "chat.hpp"
 
 namespace zato {
 
 using json = nlohmann::json;
 
-class Tool {
+class Tool
+{
 
 public:
   virtual ~Tool() = default;
@@ -20,7 +20,6 @@ public:
   virtual std::string execute(const json& arguments) = 0;
 
   virtual std::string get_name() const = 0;
-
 };
 
 } // namespace zato

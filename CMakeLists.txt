@@ -28,38 +28,35 @@ find_package(llama REQUIRED)
 find_package(httplib REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
-
-
-
 # cuda
 if(ZATO_USE_CUDA_BACKEND)
   find_library(GGML_CUDA_LIB
-      NAMES ggml-cuda libggml-cuda
-      PATHS ${CMAKE_LIBRARY_PATH} /usr/lib64 /usr/lib /lib64 /lib
+    NAMES ggml-cuda libggml-cuda
+    PATHS ${CMAKE_LIBRARY_PATH} /usr/lib64 /usr/lib /lib64 /lib
   )
+
   if(NOT GGML_CUDA_LIB)
     message(FATAL_ERROR
       "ZATO_USE_CUDA_BACKEND=ON but ggml-cuda was not found. "
       "Build/install CUDA llama first, then set -DZATO_LLAMA_ROOT=/path/to/llama-cuda.")
   endif()
+
   message(STATUS "CUDA backend enabled: ${GGML_CUDA_LIB}")
 else()
   message(STATUS "CUDA backend disabled (ZATO_USE_CUDA_BACKEND=OFF).")
 endif()
 
 add_executable(${PROJECT_NAME}
-    src/gym.cpp
-    src/model.cpp
+  src/gym.cpp
+  src/model.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    /usr/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  /usr/include
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE llama)
 target_link_libraries(${PROJECT_NAME} PRIVATE httplib::httplib)
 target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json)
-
-
 target_compile_options(${PROJECT_NAME} PRIVATE -O3)
