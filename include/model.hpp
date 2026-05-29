@@ -12,9 +12,9 @@
 #pragma once
 
 #include "chat.hpp"
+#include "imodel.hpp"
 
 #include <cstdint>
-#include <functional>
 #include <ggml.h>
 #include <llama.h>
 #include <memory>
@@ -24,7 +24,6 @@
 #include <vector>
 
 namespace zato {
-using ResponseCallback = std::function<void(const std::string&)>;
 
 // DEFAULTS MODEL CONFIG
 struct ModelConfig
@@ -95,7 +94,7 @@ private:
 
 // class model
 
-class Model
+class Model : public IModel
 {
 
 public:

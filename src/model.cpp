@@ -1,7 +1,8 @@
 /**
  * @file model.cpp
  * @author Aska Lyn (saltedc137@gmail)
- * @brief Model implementation — GGUF loading, token generation, tool call parsing.
+ * @brief Model implementation — GGUF loading, token generation, tool call
+ * parsing.
  * @version 0.1
  * @date 2026-04-27
  *
@@ -27,7 +28,9 @@
 
 namespace zato {
 
-static std::string strip_code_fence_json(const std::string &text) {
+static std::string
+strip_code_fence_json(const std::string& text)
+{
   std::string t = trim_copy(text);
   if (t.rfind("```", 0) != 0) {
     return t;
@@ -44,7 +47,8 @@ static std::string strip_code_fence_json(const std::string &text) {
 }
 
 static std::optional<common_chat_msg>
-try_parse_tool_call_message(const std::string &text) {
+try_parse_tool_call_message(const std::string& text)
+{
   std::string t = strip_code_fence_json(text);
   t = trim_copy(t);
 
@@ -54,7 +58,8 @@ try_parse_tool_call_message(const std::string &text) {
 
   try {
     json j = json::parse(t);
-    if (!j.is_object() || !j.contains("tool_calls") || !j["tool_calls"].is_array()) {
+    if (!j.is_object() || !j.contains("tool_calls") ||
+        !j["tool_calls"].is_array()) {
       return std::nullopt;
     }
 
@@ -65,11 +70,11 @@ try_parse_tool_call_message(const std::string &text) {
       msg.content = j["content"].get<std::string>();
     }
 
-    const auto &calls = j["tool_calls"];
+    const auto& calls = j["tool_calls"];
     msg.tool_calls.reserve(calls.size());
 
     for (size_t i = 0; i < calls.size(); ++i) {
-      const auto &c = calls.at(i);
+      const auto& c = calls.at(i);
       if (!c.is_object() || !c.contains("tool_name")) {
         continue;
       }
@@ -78,8 +83,9 @@ try_parse_tool_call_message(const std::string &text) {
       call.tool_name = c.at("tool_name").get<std::string>();
 
       if (c.contains("tool_args")) {
-        const auto &args = c.at("tool_args");
-        call.tool_args = args.is_string() ? args.get<std::string>() : args.dump();
+        const auto& args = c.at("tool_args");
+        call.tool_args =
+          args.is_string() ? args.get<std::string>() : args.dump();
       } else {
         call.tool_args = "{}";
       }
@@ -334,7 +340,8 @@ Model::generate_from_token(const std::vector<llama_token>& all_tokens,
   // Find common prefix with cached tokens to reuse KV cache across turns
   size_t common_prefix = 0;
   if (!processed_tokens_.empty() && !all_tokens.empty()) {
-    const size_t min_len = std::min(processed_tokens_.size(), all_tokens.size());
+    const size_t min_len =
+      std::min(processed_tokens_.size(), all_tokens.size());
     while (common_prefix < min_len &&
            processed_tokens_[common_prefix] == all_tokens[common_prefix]) {
       ++common_prefix;
@@ -343,10 +350,8 @@ Model::generate_from_token(const std::vector<llama_token>& all_tokens,
 
   // Trim stale KV cache entries beyond the common prefix
   if (common_prefix < processed_tokens_.size()) {
-    llama_memory_seq_rm(llama_get_memory(context_),
-                        0,
-                        static_cast<llama_pos>(common_prefix),
-                        -1);
+    llama_memory_seq_rm(
+      llama_get_memory(context_), 0, static_cast<llama_pos>(common_prefix), -1);
     processed_tokens_.resize(common_prefix);
     n_past_ = static_cast<int32_t>(common_prefix);
   }
@@ -359,10 +364,9 @@ Model::generate_from_token(const std::vector<llama_token>& all_tokens,
 
     for (size_t i = 0; i < new_tokens.size();) {
       const size_t batch_size =
-        std::min(static_cast<size_t>(config_.n_batch),
-                 new_tokens.size() - i);
-      auto batch = llama_batch_get_one(
-        new_tokens.data() + i, static_cast<int32_t>(batch_size));
+        std::min(static_cast<size_t>(config_.n_batch), new_tokens.size() - i);
+      auto batch = llama_batch_get_one(new_tokens.data() + i,
+                                       static_cast<int32_t>(batch_size));
       if (llama_decode(context_, batch) != 0) {
         throw ModelError("Failed to decode prompt tokens");
       }
@@ -374,8 +378,8 @@ Model::generate_from_token(const std::vector<llama_token>& all_tokens,
     n_past_ = static_cast<int32_t>(processed_tokens_.size());
   }
 
-  constexpr int max_new_tokens = 4096;
-  constexpr size_t max_output_chars = 12000;
+  constexpr int max_new_tokens = 2048;
+  constexpr size_t max_output_chars = 8000;
   const std::vector<std::string> stop_sequences = { "<|im_end|>",
                                                     "<|endoftext|>",
                                                     "[END_OF_TEXT]",
@@ -444,24 +448,10 @@ Model::generate(const std::vector<common_chat_msg>& messages,
     return make_assistant_msg("");
   }
 
-  // Build renderable messages: the conversation plus optional tool instruction
+  (void)tools; // tool calling rules are in the system prompt
+
+  // Build renderable messages
   std::vector<common_chat_msg> renderable = messages;
-  if (!tools.empty()) {
-    if (cached_tools_ != tools) {
-      json tool_schemas = json::array();
-      for (const auto &t : tools) {
-        tool_schemas.push_back(t.to_json_schema());
-      }
-      cached_tool_instruction_ =
-        "You may call tools when needed. If you decide to call a tool, respond ONLY with a JSON object of the form:\n"
-        "{\"tool_calls\":[{\"tool_name\":\"...\",\"tool_args\":{...},\"tool_call_id\":\"...\"}],\"content\":\"\"}.\n"
-        "If no tool is needed, respond normally with plain text.\n\n"
-        "Available tools (JSON schema):\n" +
-        tool_schemas.dump();
-      cached_tools_ = tools;
-    }
-    renderable.push_back(make_system_msg(cached_tool_instruction_));
-  }
 
   std::string prompt;
 
@@ -491,7 +481,8 @@ Model::generate(const std::vector<common_chat_msg>& messages,
                                                  nullptr,
                                                  0);
 
-      for (int attempt = 0; needed > 0 && attempt < kMaxTemplateRetries; ++attempt) {
+      for (int attempt = 0; needed > 0 && attempt < kMaxTemplateRetries;
+           ++attempt) {
         std::string rendered(static_cast<size_t>(needed) + 1, '\0');
         int32_t written =
           llama_chat_apply_template(tmpl.c_str(),
@@ -501,7 +492,9 @@ Model::generate(const std::vector<common_chat_msg>& messages,
                                     rendered.data(),
                                     static_cast<int32_t>(rendered.size()));
 
-        if (written < 0) break;
+        if (written < 0) {
+          break;
+        }
 
         if (written > static_cast<int32_t>(rendered.size())) {
           needed = written;
@@ -521,8 +514,8 @@ Model::generate(const std::vector<common_chat_msg>& messages,
   // Fallback: manual chatml formatting
   if (prompt.empty()) {
     auto* tmpl = weight_ ? weight_->get_templates() : nullptr;
-    prompt = tmpl != nullptr ? tmpl->apply(renderable)
-                             : format_chatml(renderable);
+    prompt =
+      tmpl != nullptr ? tmpl->apply(renderable) : format_chatml(renderable);
   }
 
   auto tokens = tokenize(prompt);

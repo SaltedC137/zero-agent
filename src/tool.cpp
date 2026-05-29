@@ -14,8 +14,12 @@
 #include "error.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <sys/wait.h>
 #include <unordered_map>
 
 namespace zato {
@@ -128,7 +132,7 @@ public:
     if (path.empty()) {
       throw ToolArgumentError(tool_name, "'path' must not be empty");
     }
-    if (path.rfind("/", 0) == 0) {
+    if (path.rfind('/', 0) == 0) {
       throw ToolArgumentError(tool_name, "absolute paths are not allowed");
     }
     if (path.find("..") != std::string::npos) {
@@ -179,6 +183,161 @@ public:
   std::string get_name() const override { return "read_text_file"; }
 };
 
+class RunBashTool final : public Tool
+{
+public:
+  common_chat_tool get_definition() const override
+  {
+    return { .name = "run_bash",
+             .description =
+               "Execute a bash command and return its stdout/stderr. "
+               "Runs sandboxed via bubblewrap (bwrap) when available: "
+               "isolated filesystem (rw only in project dir), no network, "
+               "30s timeout. Falls back to bare subprocess if bwrap "
+               "is not installed.",
+             .params = { { .name = "command",
+                           .type = "string",
+                           .description =
+                             "The bash command to run. Examples: "
+                             "'ls -la', 'grep -r foo src/', "
+                             "'cat file.txt', 'git diff --stat', "
+                             "'cmake --build build'.",
+                           .required = true } } };
+  }
+
+  std::string execute(const json& arguments) override
+  {
+    static constexpr const char* kBlocked[] = {
+      "rm ", "sudo ", "chmod ", "chown ", "mkfs", "dd if=", ":(){",
+    };
+    const std::string tool_name = get_name();
+
+    if (!arguments.contains("command") ||
+        !arguments.at("command").is_string()) {
+      throw ToolArgumentError(tool_name, "'command' must be a string");
+    }
+
+    const std::string cmd = arguments.at("command").get<std::string>();
+    if (cmd.empty()) {
+      throw ToolArgumentError(tool_name, "'command' must not be empty");
+    }
+
+    for (const auto& blocked : kBlocked) {
+      if (cmd.find(blocked) != std::string::npos) {
+        throw ToolArgumentError(tool_name,
+                                "blocked dangerous command: " + cmd);
+      }
+    }
+
+    const std::string wrapped = build_sandbox_cmd(cmd);
+
+    std::array<char, 128> buf{};
+    std::string output;
+    output.reserve(4096);
+
+    FILE* pipe = popen(wrapped.c_str(), "r");
+    if (pipe == nullptr) {
+      throw ToolArgumentError(tool_name, "failed to execute: " + cmd);
+    }
+
+    static constexpr size_t kMaxOutput = 10000;
+    while (fgets(buf.data(), static_cast<int>(buf.size()), pipe) != nullptr) {
+      output += buf.data();
+      if (output.size() > kMaxOutput) {
+        output.resize(kMaxOutput);
+        break;
+      }
+    }
+
+    int rc = pclose(pipe);
+    int exit_code = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+    bool truncated = output.size() >= kMaxOutput;
+
+    json out;
+    out["command"] = cmd;
+    out["sandbox"] = sandbox_available_;
+    out["exit_code"] = exit_code;
+    out["truncated"] = truncated;
+    out["output"] = output;
+    return out.dump();
+  }
+
+  std::string get_name() const override { return "run_bash"; }
+
+private:
+  static std::string build_sandbox_cmd(const std::string& cmd)
+  {
+    if (sandbox_available_) {
+      return bwrap_prefix() + "timeout 30 bash -c '" +
+             escape_sq(cmd) + "' 2>&1";
+    }
+    return "timeout 30 bash -c '" + escape_sq(cmd) + "' 2>&1";
+  }
+
+  static std::string bwrap_prefix()
+  {
+    const char* cwd = sandbox_root_.c_str();
+
+    // clang-format off
+    return std::string("bwrap ")
+      + "--ro-bind /usr /usr "
+      + "--ro-bind /lib /lib "
+      + "--ro-bind /lib64 /lib64 "
+      + "--ro-bind /bin /bin "
+      + "--ro-bind /etc /etc "
+      + "--ro-bind /opt /opt "
+      + "--bind " + cwd + " " + cwd + " "
+      + "--chdir " + cwd + " "
+      + "--unshare-net "
+      + "--unshare-pid "
+      + "--die-with-parent "
+      + "--dev /dev "
+      + "--proc /proc "
+      + "--tmpfs /tmp "
+      + "--tmpfs /var "
+      + "--tmpfs /run "
+      + "--clearenv "
+      + "--setenv HOME " + cwd + " "
+      + "--setenv PATH /usr/bin:/bin:/usr/local/bin "
+      + "--setenv USER agent "
+      + "--setenv TERM xterm-256color "
+      + "-- ";
+    // clang-format on
+  }
+
+  static std::string escape_sq(const std::string& s)
+  {
+    std::string r;
+    r.reserve(s.size() + 8);
+    for (char c : s) {
+      if (c == '\'') r += "'\\''";
+      else r += c;
+    }
+    return r;
+  }
+
+  static bool detect_bwrap()
+  {
+    FILE* p = popen("bwrap --version 2>/dev/null", "r");
+    if (p == nullptr) return false;
+    char buf[64]{};
+    bool ok = fgets(buf, sizeof(buf), p) != nullptr;
+    pclose(p);
+    return ok;
+  }
+
+  static std::string detect_cwd()
+  {
+    return std::filesystem::current_path().string();
+  }
+
+  static const bool sandbox_available_;
+  static const std::string sandbox_root_;
+};
+
+const bool RunBashTool::sandbox_available_ = RunBashTool::detect_bwrap();
+const std::string RunBashTool::sandbox_root_ = RunBashTool::detect_cwd();
+
 struct BuiltinToolRegistrar
 {
   BuiltinToolRegistrar()
@@ -189,6 +348,8 @@ struct BuiltinToolRegistrar
       "add", []() { return std::make_unique<AddTool>(); });
     (void)ToolRegistry::register_factory(
       "read_text_file", []() { return std::make_unique<ReadTextFileTool>(); });
+    (void)ToolRegistry::register_factory(
+      "run_bash", []() { return std::make_unique<RunBashTool>(); });
   }
 };
 
