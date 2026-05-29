@@ -1,8 +1,7 @@
 /**
- * @file chat.hpp
+ * @file tool.cpp
  * @author Aska Lyn (saltedc137@gmail)
- * @brief structs and functions for chat management, including message
- * representation, tool calls, and message diffs.
+ * @brief Built-in tool implementations and ToolRegistry thread-safe factory map.
  * @version 0.1
  * @date 2026-04-27
  *

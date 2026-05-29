@@ -214,6 +214,12 @@ struct common_chat_tool_param
   std::string type;
   std::string description;
   bool required = false;
+
+  bool operator==(const common_chat_tool_param& other) const
+  {
+    return name == other.name && type == other.type &&
+           description == other.description && required == other.required;
+  }
 };
 
 struct common_chat_tool
@@ -221,6 +227,12 @@ struct common_chat_tool
   std::string name;
   std::string description;
   std::vector<common_chat_tool_param> params;
+
+  bool operator==(const common_chat_tool& other) const
+  {
+    return name == other.name && description == other.description &&
+           params == other.params;
+  }
 
   json to_json_schema() const
   {
@@ -436,6 +448,17 @@ common_chat_templates_init(const llama_model* model)
   }
 
   return { .name = "simple", .format_func = format_simple };
+}
+
+inline std::string
+trim_copy(const std::string& s)
+{
+  const auto begin = s.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos) {
+    return "";
+  }
+  const auto end = s.find_last_not_of(" \t\r\n");
+  return s.substr(begin, end - begin + 1);
 }
 
 } // namespace zato

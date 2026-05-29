@@ -40,6 +40,8 @@ struct ModelConfig
   int n_ctx = 10240;
   int n_batch = -1;
 
+  int n_gpu_layers = 999;
+
   static int default_threads() {
     const unsigned hc = std::thread::hardware_concurrency();
     const unsigned base = hc > 1 ? (hc - 1) : 1;
@@ -60,7 +62,8 @@ class ModelWeight
   friend class Model;
 
 public:
-  static std::shared_ptr<ModelWeight> create(const std::string& model_path);
+  static std::shared_ptr<ModelWeight> create(const std::string& model_path,
+                                              int n_gpu_layers = 999);
 
   ~ModelWeight();
 
@@ -165,13 +168,16 @@ private:
   void initialize_context(const ModelConfig& model_config);
 
   std::shared_ptr<ModelWeight> weight_;
-  common_chat_templates* templates_ = nullptr;
   llama_context* context_ = nullptr;
   llama_sampler* sampler_ = nullptr;
 
   std::vector<llama_token> processed_tokens_;
   int n_past_ = 0;
   ModelConfig config_;
+
+  // Tool instruction cache — recomputed only when tools change
+  mutable std::string cached_tool_instruction_;
+  mutable std::vector<common_chat_tool> cached_tools_;
 };
 
 } // namespace zato

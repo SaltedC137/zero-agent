@@ -14,17 +14,6 @@
 namespace {
 
 std::string
-trim_copy(const std::string& text)
-{
-  const auto begin = text.find_first_not_of(" \t\r\n");
-  if (begin == std::string::npos) {
-    return "";
-  }
-  const auto end = text.find_last_not_of(" \t\r\n");
-  return text.substr(begin, end - begin + 1);
-}
-
-std::string
 load_system_prompt_file(const std::string& path)
 {
   std::ifstream file(path);
@@ -34,18 +23,7 @@ load_system_prompt_file(const std::string& path)
 
   std::string content((std::istreambuf_iterator<char>(file)),
                       std::istreambuf_iterator<char>());
-  content = trim_copy(content);
-
-  const std::size_t begin = content.find("~~~");
-  const std::size_t end = content.rfind("~~~");
-  if (begin != std::string::npos && end != std::string::npos && end > begin) {
-    const std::size_t line_begin = content.find('\n', begin);
-    if (line_begin != std::string::npos) {
-      return trim_copy(content.substr(line_begin + 1, end - line_begin - 1));
-    }
-  }
-
-  return content;
+  return zato::trim_copy(content);
 }
 
 } // namespace
@@ -107,7 +85,8 @@ main(int argc, char** argv)
     if (use_agent) {
       std::vector<std::unique_ptr<zato::Tool>> tools;
       for (const std::string& name : { std::string("echo"),
-                                      std::string("add") }) {
+                                      std::string("add"),
+                                      std::string("read_text_file") }) {
         auto tool = zato::ToolRegistry::create(name);
         if (!tool) {
           throw zato::Error("Tool not registered: " + name);
@@ -142,8 +121,10 @@ main(int argc, char** argv)
 
       if (use_agent) {
         std::cout << "AI> " << std::flush;
-        const std::string response = agent->run_loop(messages, nullptr);
-        std::cout << response << std::endl;
+        agent->run_loop(messages, [](const std::string& delta) {
+          std::cout << delta << std::flush;
+        });
+        std::cout << "\n";
       } else {
         std::vector<zato::common_chat_tool> tools;
 
@@ -152,16 +133,16 @@ main(int argc, char** argv)
             model->generate(messages, tools, [](const std::string &delta) {
               std::cout << delta << std::flush;
             });
-        std::cout << std::endl;
+        std::cout << "\n";
 
         messages.push_back(response);
       }
     }
   } catch (const zato::Error& e) {
-    std::cerr << e.what() << std::endl;
+    std::cerr << e.what() << "\n";
     return 1;
   } catch (const std::exception& e) {
-    std::cerr << "Error: " << e.what() << std::endl;
+    std::cerr << "Error: " << e.what() << "\n";
     return 1;
   }
 

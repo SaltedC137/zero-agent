@@ -66,6 +66,10 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
 
   std::vector<common_chat_tool> tool_definitions = get_tool_definitions();
 
+  auto trim_copy = [](const std::string& s) -> std::string {
+    return zato::trim_copy(s);
+  };
+
   while (true) {
     for (const auto& cb : callbacks_) {
       cb->before_llm_call(messages);
@@ -88,7 +92,7 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
     }
 
     for (const auto& tool_call : parsed_msg.tool_calls) {
-      std::string tool_name = tool_call.tool_name;
+      std::string tool_name = trim_copy(tool_call.tool_name);
       std::string tool_arguments = tool_call.tool_args;
 
       ToolResult result("");
@@ -137,15 +141,18 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
         cb->after_tool_execution(tool_name, result);
       }
 
-      // If still an error after callbacks, re-throw
-      if (result.has_error()) {
-        throw ToolError(tool_name, result.error().message);
-      }
-
       common_chat_msg tool_msg;
       tool_msg.role = MessageRole::TOOL;
-      tool_msg.content = result.output();
       tool_msg.tool_call_id = tool_call.tool_call_id;
+
+      // Push error as tool result so LLM can retry, instead of aborting
+      if (result.has_error()) {
+        json error_json;
+        error_json["error"] = result.error().message;
+        tool_msg.content = error_json.dump();
+      } else {
+        tool_msg.content = result.output();
+      }
       messages.push_back(tool_msg);
     }
   }
