@@ -1,9 +1,10 @@
 /**
- * @file model.hpp
- * @author learn from agent.cpp (saltedc137@gmail.com)
- * @brief
+ * @file chat.hpp
+ * @author Aska Lyn (saltedc137@gmail)
+ * @brief structs and functions for chat management, including message
+ * representation, tool calls, and message diffs.
  * @version 0.1
- * @date 2026-05-27
+ * @date 2026-04-27
  *
  * @copyright Copyright (c) 2026
  *

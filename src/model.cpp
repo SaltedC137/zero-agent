@@ -1,3 +1,15 @@
+/**
+ * @file chat.hpp
+ * @author Aska Lyn (saltedc137@gmail)
+ * @brief structs and functions for chat management, including message
+ * representation, tool calls, and message diffs.
+ * @version 0.1
+ * @date 2026-04-27
+ *
+ * @copyright Copyright (c) 2026
+ *
+ */
+
 #include "model.hpp"
 #include "chat.hpp"
 #include "error.hpp"

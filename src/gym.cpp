@@ -11,6 +11,44 @@
 #include <string>
 #include <vector>
 
+namespace {
+
+std::string
+trim_copy(const std::string& text)
+{
+  const auto begin = text.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos) {
+    return "";
+  }
+  const auto end = text.find_last_not_of(" \t\r\n");
+  return text.substr(begin, end - begin + 1);
+}
+
+std::string
+load_system_prompt_file(const std::string& path)
+{
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    throw zato::Error("Failed to open system prompt file: " + path);
+  }
+
+  std::string content((std::istreambuf_iterator<char>(file)),
+                      std::istreambuf_iterator<char>());
+  content = trim_copy(content);
+
+  const std::size_t begin = content.find("~~~");
+  const std::size_t end = content.rfind("~~~");
+  if (begin != std::string::npos && end != std::string::npos && end > begin) {
+    const std::size_t line_begin = content.find('\n', begin);
+    if (line_begin != std::string::npos) {
+      return trim_copy(content.substr(line_begin + 1, end - line_begin - 1));
+    }
+  }
+
+  return content;
+}
+
+} // namespace
 
 int
 main(int argc, char** argv)
@@ -68,22 +106,28 @@ main(int argc, char** argv)
 
     if (use_agent) {
       std::vector<std::unique_ptr<zato::Tool>> tools;
-      tools.push_back(std::make_unique<EchoTool>());
-      tools.push_back(std::make_unique<AddTool>());
+      for (const std::string& name : { std::string("echo"),
+                                      std::string("add") }) {
+        auto tool = zato::ToolRegistry::create(name);
+        if (!tool) {
+          throw zato::Error("Tool not registered: " + name);
+        }
+        tools.push_back(std::move(tool));
+      }
 
       agent = std::make_unique<zato::Agent>(
           model,
           std::move(tools),
           std::vector<std::unique_ptr<zato::Callback>>{},
-          zato::load_system_prompt_file(system_prompt_path));
+          load_system_prompt_file(system_prompt_path));
     } else {
-      messages.push_back(zato::make_system_msg(
-          zato::load_system_prompt_file(system_prompt_path)));
+      messages.push_back(
+        zato::make_system_msg(load_system_prompt_file(system_prompt_path)));
     }
 
     std::string user_input;
     while (true) {
-      std::cout << "\nYou> ";
+      std::cout << "You> ";
       if (!std::getline(std::cin, user_input)) {
         break;
       }
