@@ -51,8 +51,9 @@ add_executable(${PROJECT_NAME}
   src/model.cpp
   src/agent.cpp
   src/tool.cpp
-  src/api_model.cpp
+  src/api.cpp
   src/memory.cpp
+  src/window.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -64,3 +65,4 @@ target_link_libraries(${PROJECT_NAME} PRIVATE llama)
 target_link_libraries(${PROJECT_NAME} PRIVATE httplib::httplib)
 target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json)
 target_compile_options(${PROJECT_NAME} PRIVATE -O3)
+

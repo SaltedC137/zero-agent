@@ -1,5 +1,7 @@
 #include "memory.hpp"
 
+#include <iostream>
+
 namespace zato {
 
 MemoryManager::MemoryManager(std::shared_ptr<IModel> model,
@@ -14,15 +16,22 @@ MemoryManager::MemoryManager(std::shared_ptr<IModel> model,
 void
 MemoryManager::compact(std::vector<common_chat_msg>& messages)
 {
-  if (messages.empty()) return;
+  if (messages.empty()) {
+    return;
+  }
 
   size_t total = 0;
-  for (const auto& m : messages) total += m.content.size();
-  if (total < max_chars_) return;
+  for (const auto& m : messages) {
+    total += m.content.size();
+  }
+  if (total < max_chars_) {
+    return;
+  }
 
-  const size_t sys_end =
-    (messages[0].role == MessageRole::SYSTEM) ? 1U : 0U;
-  if (messages.size() <= sys_end + 6) return;
+  const size_t sys_end = (messages[0].role == MessageRole::SYSTEM) ? 1U : 0U;
+  if (messages.size() <= sys_end + 6) {
+    return;
+  }
 
   // Build summary request from old messages
   std::string prompt =
@@ -32,8 +41,8 @@ MemoryManager::compact(std::vector<common_chat_msg>& messages)
 
   for (size_t i = sys_end; i < messages.size() - 6; ++i) {
     if (!messages[i].content.empty()) {
-      prompt += role_to_string(messages[i].role) + ": " +
-                messages[i].content + "\n";
+      prompt +=
+        role_to_string(messages[i].role) + ": " + messages[i].content + "\n";
     }
   }
 
@@ -45,12 +54,14 @@ MemoryManager::compact(std::vector<common_chat_msg>& messages)
 
   auto response = model_->generate(req, {}, nullptr);
 
-  if (response.content.empty()) return;
+  if (response.content.empty()) {
+    std::cerr << "  [compaction failed: empty response]\n" << std::flush;
+    return;
+  }
 
   // Replace old messages with summary
   messages.erase(messages.begin() + static_cast<long>(sys_end),
-                 messages.begin() +
-                   static_cast<long>(messages.size() - 6));
+                 messages.begin() + static_cast<long>(messages.size() - 6));
   common_chat_msg mem;
   mem.role = MessageRole::SYSTEM;
   mem.content = "[Conversation memory]: " + response.content;

@@ -3,8 +3,10 @@
 #include "chat.hpp"
 #include "imodel.hpp"
 
+#include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,8 +50,13 @@ private:
   static common_chat_msg build_msg(const std::string& full,
                                    const nlohmann::json& acc);
 
+  // Returns a connected client (reuses cached connection when possible)
+  httplib::Client& get_client(const std::string& host);
+
   Config cfg_;
   bool is_anthropic_;
+  std::unique_ptr<httplib::Client> cli_;
+  std::string cli_host_; // track which host cli_ is connected to
 };
 
 } // namespace zato

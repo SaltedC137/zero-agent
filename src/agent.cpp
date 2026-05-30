@@ -66,7 +66,8 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
 
   std::vector<common_chat_tool> tool_definitions = get_tool_definitions();
 
-  static constexpr int kMaxIterations = 10;
+  static constexpr int kMaxIterations = 25;
+  static constexpr size_t kMaxToolOutput = 2000;
   std::vector<common_chat_tool_call> last_tool_calls;
 
   // Helper: extract commands from ```bash / ```sh blocks in model output.
@@ -186,7 +187,12 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
             ej["error"] = result.error().message;
             tmsg.content = ej.dump();
           } else {
-            tmsg.content = result.output();
+            std::string out = result.output();
+            if (out.size() > kMaxToolOutput) {
+              out.resize(kMaxToolOutput);
+              out += "\n... [truncated]";
+            }
+            tmsg.content = std::move(out);
           }
           messages.push_back(tmsg);
         }
@@ -217,7 +223,12 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
         error_json["error"] = result.error().message;
         tool_msg.content = error_json.dump();
       } else {
-        tool_msg.content = result.output();
+        std::string out = result.output();
+        if (out.size() > kMaxToolOutput) {
+          out.resize(kMaxToolOutput);
+          out += "\n... [truncated]";
+        }
+        tool_msg.content = std::move(out);
       }
       messages.push_back(tool_msg);
     }

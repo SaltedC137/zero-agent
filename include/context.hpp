@@ -15,10 +15,10 @@ namespace zato {
 class ContextManager
 {
 public:
-  ContextManager(std::shared_ptr<Model> model,
+  ContextManager(const std::shared_ptr<Model>& model,
                  int n_ctx,
                  float trim_threshold = 0.8f)
-    : model_(std::move(model))
+    : model_(model)
     , n_ctx_(n_ctx)
     , trim_threshold_(trim_threshold)
   {

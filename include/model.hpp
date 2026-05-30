@@ -128,7 +128,7 @@ public:
   // Generate a response based on the input messages and tools
   common_chat_msg generate(const std::vector<common_chat_msg>& messages,
                            const std::vector<common_chat_tool>& tools,
-                           ResponseCallback callback = nullptr);
+                           ResponseCallback callback = nullptr) override;
 
   // Generate a response based on the input messages and tools, with a custom
   std::string generate_from_token(const std::vector<llama_token>& all_tokens,
@@ -181,5 +181,10 @@ private:
   mutable std::string cached_tool_instruction_;
   mutable std::vector<common_chat_tool> cached_tools_;
 };
+
+// Parses tool-call JSON from model output. Handles code fences and
+// <think>...</think> prefixes from reasoning models.
+std::optional<common_chat_msg>
+try_parse_tool_call_message(const std::string& text);
 
 } // namespace zato

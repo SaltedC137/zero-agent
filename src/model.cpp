@@ -46,7 +46,7 @@ strip_code_fence_json(const std::string& text)
   return trim_copy(t.substr(first_nl + 1, last_fence - first_nl - 1));
 }
 
-static std::optional<common_chat_msg>
+std::optional<common_chat_msg>
 try_parse_tool_call_message(const std::string& text)
 {
   std::string t = strip_code_fence_json(text);

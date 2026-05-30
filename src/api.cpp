@@ -1,9 +1,8 @@
-#include "api_model.hpp"
+#include "api.hpp"
 
 #include <httplib.h>
+#include <iostream>
 #include <nlohmann/json.hpp>
-
-#include <stdexcept>
 
 namespace zato {
 
@@ -52,8 +51,7 @@ ApiModel::generate_openai(const std::vector<common_chat_msg>& msgs,
   }
 
   auto [host, path] = split_url(cfg_.base_url, "/chat/completions");
-  httplib::Client cli(host);
-  cli.set_read_timeout(120);
+  auto& cli = get_client(host);
 
   httplib::Headers hdrs = { { "Content-Type", "application/json" } };
   if (!cfg_.api_key.empty()) {
@@ -63,17 +61,20 @@ ApiModel::generate_openai(const std::vector<common_chat_msg>& msgs,
   std::string full;
   json acc = json::array();
 
-  auto res = cli.Post(path,
-                      hdrs,
-                      body.dump(),
-                      "application/json",
-                      [&](const char* d, size_t n) -> bool {
-                        return parse_sse(std::string(d, n), full, acc, callback);
-                      });
+  auto res =
+    cli.Post(path,
+             hdrs,
+             body.dump(),
+             "application/json",
+             [&](const char* d, size_t n) -> bool {
+               return parse_sse(std::string(d, n), full, acc, callback);
+             });
 
   if (!res) {
+    std::cerr << "\r  [API fail: " << httplib::to_string(res.error()) << "]"
+              << '\n';
     return make_assistant_msg(
-      "[API error " + std::to_string(-1) + "]");
+      "[API error: " + std::string(httplib::to_string(res.error())) + "]");
   }
 
   return build_msg(full, acc);
@@ -91,10 +92,20 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
   body["max_tokens"] = 4096;
 
   body["messages"] = json::array();
+  bool has_system = false;
   for (size_t i = 0; i < msgs.size(); ++i) {
     const auto& m = msgs[i];
     if (m.role == MessageRole::SYSTEM) {
-      body["system"] = m.content;
+      if (!has_system) {
+        body["system"] = m.content;
+        has_system = true;
+      } else {
+        // Additional system messages (memory summaries) → user message
+        json jm;
+        jm["role"] = "user";
+        jm["content"] = m.content;
+        body["messages"].push_back(jm);
+      }
       continue;
     }
     json jm;
@@ -102,7 +113,7 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
     if (!m.tool_calls.empty()) {
       jm["content"] = json::array();
       if (!m.content.empty()) {
-        jm["content"].push_back({{"type", "text"}, {"text", m.content}});
+        jm["content"].push_back({ { "type", "text" }, { "text", m.content } });
       }
       for (const auto& tc : m.tool_calls) {
         json tcu;
@@ -147,8 +158,7 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
   }
 
   auto [host, path] = split_url(cfg_.base_url, "/messages");
-  httplib::Client cli(host);
-  cli.set_read_timeout(120);
+  auto& cli = get_client(host);
 
   httplib::Headers hdrs = { { "Content-Type", "application/json" } };
   if (!cfg_.api_key.empty()) {
@@ -159,21 +169,31 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
   std::string full;
   json acc = json::array();
 
+  std::string raw_sse;
   auto res = cli.Post(path,
                       hdrs,
                       body.dump(),
                       "application/json",
                       [&](const char* d, size_t n) -> bool {
-                        return parse_sse_anthropic(std::string(d, n), full, acc,
-                                                  callback);
+                        raw_sse.append(d, n);
+                        return parse_sse_anthropic(
+                          std::string(d, n), full, acc, callback);
                       });
 
   if (!res) {
+    std::cerr << "\r  [API fail: " << httplib::to_string(res.error()) << "]"
+              << '\n';
     return make_assistant_msg(
-      "[API error " + std::to_string(-1) + "]");
+      "[API error: " + std::string(httplib::to_string(res.error())) + "]");
   }
 
-  return build_msg(full, acc);
+  auto msg = build_msg(full, acc);
+  if (msg.content.empty() && msg.tool_calls.empty() && !raw_sse.empty()) {
+    std::cerr << "  [empty] SSE:"
+              << raw_sse.substr(0, std::min(raw_sse.size(), size_t(300)))
+              << "\n";
+  }
+  return msg;
 }
 
 // ── helpers ────────────────────────────────────────────────────────
@@ -224,8 +244,9 @@ ApiModel::parse_sse(const std::string& chunk,
       if (delta.contains("content") && delta["content"].is_string()) {
         std::string t = delta["content"];
         full += t;
-        if (cb)
+        if (cb) {
           cb(t);
+        }
       }
       if (delta.contains("tool_calls")) {
         for (const auto& tc : delta["tool_calls"]) {
@@ -234,15 +255,17 @@ ApiModel::parse_sse(const std::string& chunk,
             acc.push_back(json::object());
           }
           auto& a = acc[idx];
-          if (tc.contains("id"))
+          if (tc.contains("id")) {
             a["id"] = tc["id"];
+          }
           if (tc.contains("function")) {
             if (tc["function"].contains("name")) {
               a["name"] = tc["function"]["name"];
             }
             if (tc["function"].contains("arguments")) {
-              if (!a.contains("arguments"))
+              if (!a.contains("arguments")) {
                 a["arguments"] = "";
+              }
               a["arguments"] = a["arguments"].get<std::string>() +
                                tc["function"]["arguments"].get<std::string>();
             }
@@ -261,47 +284,62 @@ ApiModel::parse_sse_anthropic(const std::string& chunk,
                               json& acc,
                               ResponseCallback& cb)
 {
+  // Parse SSE lines — handles both "event: + data:" and bare "data:" formats
   size_t pos = 0;
-  std::string current_event;
+  std::string event_type;
   while (pos < chunk.size()) {
     auto nl = chunk.find('\n', pos);
     std::string line = chunk.substr(pos, nl - pos);
     pos = (nl == std::string::npos) ? chunk.size() : nl + 1;
 
     if (line.rfind("event: ", 0) == 0) {
-      current_event = line.substr(7);
+      event_type = line.substr(7);
       continue;
     }
-    if (line.rfind("data: ", 0) != 0)
+    if (line.rfind("data: ", 0) != 0) {
       continue;
+    }
     std::string data = line.substr(6);
+    if (data == "[DONE]") {
+      continue;
+    }
     try {
       auto j = json::parse(data);
-      if (current_event == "content_block_delta") {
-        const auto& delta = j["delta"];
+      // Use JSON "type" field as fallback when no event: line present
+      std::string type = j.value("type", event_type);
+      const auto& delta = j.value("delta", json::object());
+
+      if (type == "content_block_delta") {
         if (delta.value("type", "") == "text_delta") {
-          std::string t = delta["text"];
-          full += t;
-          if (cb)
-            cb(t);
+          std::string t = delta.value("text", "");
+          if (!t.empty()) {
+            full += t;
+            if (cb) {
+              cb(t);
+            }
+          }
         } else if (delta.value("type", "") == "input_json_delta") {
-          std::string partial = delta["partial_json"];
-          if (!acc.empty()) {
+          std::string partial = delta.value("partial_json", "");
+          if (!partial.empty() && !acc.empty()) {
             auto& a = acc.back();
-            if (!a.contains("arguments"))
+            if (!a.contains("arguments")) {
               a["arguments"] = "";
+            }
             a["arguments"] = a["arguments"].get<std::string>() + partial;
           }
         }
-      } else if (current_event == "content_block_start") {
-        const auto& block = j["content_block"];
+      } else if (type == "content_block_start") {
+        const auto& block = j.value("content_block", json::object());
         if (block.value("type", "") == "tool_use") {
           json a;
-          a["name"] = block["name"];
-          a["id"] = block["id"];
+          a["name"] = block.value("name", "");
+          a["id"] = block.value("id", "");
           a["arguments"] = "";
           acc.push_back(a);
         }
+      } else if (type == "message_stop" || type == "message_delta") {
+        // End of message — stop processing
+        break;
       }
     } catch (...) {
     }
@@ -315,15 +353,34 @@ ApiModel::build_msg(const std::string& full, const json& acc)
   common_chat_msg msg;
   msg.role = MessageRole::ASSISTANT;
   msg.content = full;
+  // Never return empty — fallback for silent API failures
+  if (msg.content.empty() && acc.empty()) {
+    msg.content = "[no response — context may be too long, try /clear]";
+  }
   for (const auto& a : acc) {
     common_chat_tool_call tc;
     tc.tool_name = a.value("name", "");
     tc.tool_args = a.value("arguments", "{}");
     tc.tool_call_id = a.value("id", "call_0");
-    if (!tc.tool_name.empty())
+    if (!tc.tool_name.empty()) {
       msg.tool_calls.push_back(std::move(tc));
+    }
   }
   return msg;
+}
+
+httplib::Client&
+ApiModel::get_client(const std::string& host)
+{
+  if (!cli_ || cli_host_ != host) {
+    cli_ = std::make_unique<httplib::Client>(host);
+    cli_->set_connection_timeout(10);
+    cli_->set_read_timeout(60);
+    cli_->set_write_timeout(30);
+    cli_->set_keep_alive(true);
+    cli_host_ = host;
+  }
+  return *cli_;
 }
 
 } // namespace zato

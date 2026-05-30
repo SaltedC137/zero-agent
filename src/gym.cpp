@@ -1,6 +1,6 @@
 #include "agent.hpp"
 #include "ansi.hpp"
-#include "api_model.hpp"
+#include "api.hpp"
 #include "chat.hpp"
 #include "context.hpp"
 #include "error.hpp"
@@ -10,11 +10,11 @@
 #include "tool.hpp"
 
 #include <cstdlib>
-#include <locale>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <locale>
 #include <memory>
 #include <string>
 #include <unistd.h>
@@ -25,7 +25,10 @@ namespace {
 class CompactCallback final : public zato::Callback
 {
 public:
-  explicit CompactCallback(zato::MemoryManager& m) : mem_(m) {}
+  explicit CompactCallback(zato::MemoryManager& m)
+    : mem_(m)
+  {
+  }
   void before_llm_call(std::vector<zato::common_chat_msg>& msgs) override
   {
     mem_.compact(msgs);
@@ -41,9 +44,9 @@ public:
   void before_tool_execution(std::string& tool_name,
                              std::string& arguments) override
   {
-    if (tool_name != "run_bash")
+    if (tool_name != "run_bash") {
       return;
-
+    }
     std::string cmd;
     try {
       auto args = nlohmann::json::parse(arguments);
@@ -51,10 +54,8 @@ public:
     } catch (...) {
       cmd = arguments;
     }
-
     std::cout << zato::ansi::kYellow << "\n  $ " << cmd << zato::ansi::kReset
               << "\n  Execute? [y/N] " << std::flush;
-
     std::string answer;
     if (!std::getline(std::cin, answer) ||
         (answer != "y" && answer != "Y" && answer != "yes")) {
@@ -122,8 +123,9 @@ main(int argc, char** argv)
       if (std::filesystem::exists(sessions_dir)) {
         for (const auto& entry :
              std::filesystem::directory_iterator(sessions_dir)) {
-          if (entry.is_directory())
+          if (entry.is_directory()) {
             std::cout << "  " << entry.path().filename().string() << "\n";
+          }
         }
       } else {
         std::cout << "  (no saved sessions)\n";
@@ -138,8 +140,9 @@ main(int argc, char** argv)
       use_api = true;
       continue;
     }
-    if (arg.rfind("--", 0) == 0)
+    if (arg.rfind("--", 0) == 0) {
       continue;
+    }
     if (!model_path_set) {
       model_path = arg;
       model_path_set = true;
@@ -163,8 +166,7 @@ main(int argc, char** argv)
       api_cfg.model =
         std::string(std::getenv("ANTHROPIC_MODEL") ?: "claude-sonnet-4-6");
       model = std::make_shared<zato::ApiModel>(std::move(api_cfg));
-      mem = std::make_unique<zato::MemoryManager>(
-        model, system_prompt, 48000);
+      mem = std::make_unique<zato::MemoryManager>(model, system_prompt, 48000);
 
       std::cout << zato::ansi::kBold << "Zero-Agent API mode."
                 << zato::ansi::kReset << " Model: " << zato::ansi::kCyan
@@ -179,8 +181,9 @@ main(int argc, char** argv)
       config.n_batch = 2048;
 
       int n_phys = static_cast<int>(std::thread::hardware_concurrency());
-      if (n_phys > 8)
+      if (n_phys > 8) {
         n_phys /= 2;
+      }
       config.n_threads = n_phys;
       config.n_threads_batch = n_phys;
       config.n_gpu_layers = gpu_layers;
@@ -207,8 +210,9 @@ main(int argc, char** argv)
         std::cout << zato::ansi::kDim << "[" << session_name << ": restored "
                   << messages.size() << " messages]" << zato::ansi::kReset
                   << "\n";
-        if (messages[0].role == zato::MessageRole::SYSTEM)
+        if (messages[0].role == zato::MessageRole::SYSTEM) {
           messages[0].content = system_prompt;
+        }
       }
     }
 
@@ -220,8 +224,9 @@ main(int argc, char** argv)
                                        std::string("read_text_file"),
                                        std::string("run_bash") }) {
         auto tool = zato::ToolRegistry::create(name);
-        if (!tool)
+        if (!tool) {
           throw zato::Error("Tool not registered: " + name);
+        }
         tools.push_back(std::move(tool));
       }
       std::vector<std::unique_ptr<zato::Callback>> callbacks;
@@ -238,11 +243,12 @@ main(int argc, char** argv)
     std::string user_input;
     while (true) {
       std::cout << zato::ansi::kGreen << "You> " << zato::ansi::kReset;
-      if (!std::getline(std::cin, user_input))
+      if (!std::getline(std::cin, user_input)) {
         break;
+      }
       if (user_input == "exit") {
         break;
-}
+      }
       if (user_input.empty()) {
         continue;
       }

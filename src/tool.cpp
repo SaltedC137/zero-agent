@@ -1,7 +1,8 @@
 /**
  * @file tool.cpp
  * @author Aska Lyn (saltedc137@gmail)
- * @brief Built-in tool implementations and ToolRegistry thread-safe factory map.
+ * @brief Built-in tool implementations and ToolRegistry thread-safe factory
+ * map.
  * @version 0.1
  * @date 2026-04-27
  *
@@ -105,18 +106,18 @@ public:
   common_chat_tool get_definition() const override
   {
     return { .name = "read_text_file",
-             .description =
-               "Read a UTF-8 text file from a relative path and return at most max_bytes bytes.",
-             .params = { { .name = "path",
-                           .type = "string",
-                           .description =
-                             "Relative file path, e.g. 'prompt/system.md'.",
-                           .required = true },
-                         { .name = "max_bytes",
-                           .type = "integer",
-                           .description =
-                             "Maximum bytes to read (1..20000). Default 4000.",
-                           .required = false } } };
+             .description = "Read a UTF-8 text file from a relative path and "
+                            "return at most max_bytes bytes.",
+             .params = {
+               { .name = "path",
+                 .type = "string",
+                 .description = "Relative file path, e.g. 'prompt/system.md'.",
+                 .required = true },
+               { .name = "max_bytes",
+                 .type = "integer",
+                 .description =
+                   "Maximum bytes to read (1..20000). Default 4000.",
+                 .required = false } } };
   }
 
   std::string execute(const json& arguments) override
@@ -146,7 +147,7 @@ public:
       const long long v = arguments.at("max_bytes").get<long long>();
       if (v < 1 || v > 20000) {
         throw ToolArgumentError(tool_name,
-                               "'max_bytes' must be in range 1..20000");
+                                "'max_bytes' must be in range 1..20000");
       }
       max_bytes = static_cast<std::size_t>(v);
     }
@@ -196,11 +197,10 @@ public:
                "is not installed.",
              .params = { { .name = "command",
                            .type = "string",
-                           .description =
-                             "The bash command to run. Examples: "
-                             "'ls -la', 'grep -r foo src/', "
-                             "'cat file.txt', 'git diff --stat', "
-                             "'cmake --build build'.",
+                           .description = "The bash command to run. Examples: "
+                                          "'ls -la', 'grep -r foo src/', "
+                                          "'cat file.txt', 'git diff --stat', "
+                                          "'cmake --build build'.",
                            .required = true } } };
   }
 
@@ -223,8 +223,7 @@ public:
 
     for (const auto& blocked : kBlocked) {
       if (cmd.find(blocked) != std::string::npos) {
-        throw ToolArgumentError(tool_name,
-                                "blocked dangerous command: " + cmd);
+        throw ToolArgumentError(tool_name, "blocked dangerous command: " + cmd);
       }
     }
 
@@ -267,8 +266,8 @@ private:
   static std::string build_sandbox_cmd(const std::string& cmd)
   {
     if (sandbox_available_) {
-      return bwrap_prefix() + "timeout 30 bash -c '" +
-             escape_sq(cmd) + "' 2>&1";
+      return bwrap_prefix() + "timeout 30 bash -c '" + escape_sq(cmd) +
+             "' 2>&1";
     }
     return "timeout 30 bash -c '" + escape_sq(cmd) + "' 2>&1";
   }
@@ -309,8 +308,11 @@ private:
     std::string r;
     r.reserve(s.size() + 8);
     for (char c : s) {
-      if (c == '\'') r += "'\\''";
-      else r += c;
+      if (c == '\'') {
+        r += "'\\''";
+      } else {
+        r += c;
+      }
     }
     return r;
   }
@@ -318,7 +320,9 @@ private:
   static bool detect_bwrap()
   {
     FILE* p = popen("bwrap --version 2>/dev/null", "r");
-    if (p == nullptr) return false;
+    if (p == nullptr) {
+      return false;
+    }
     char buf[64]{};
     bool ok = fgets(buf, sizeof(buf), p) != nullptr;
     pclose(p);
