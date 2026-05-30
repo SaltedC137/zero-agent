@@ -27,8 +27,6 @@ ApiModel::generate(const std::vector<common_chat_msg>& messages,
   return generate_openai(messages, tools, callback);
 }
 
-// ── OpenAI-compatible ──────────────────────────────────────────────
-
 common_chat_msg
 ApiModel::generate_openai(const std::vector<common_chat_msg>& msgs,
                           const std::vector<common_chat_tool>& tools,
@@ -57,7 +55,7 @@ ApiModel::generate_openai(const std::vector<common_chat_msg>& msgs,
   httplib::Client cli(host);
   cli.set_read_timeout(120);
 
-  httplib::Headers hdrs = {{"Content-Type", "application/json"}};
+  httplib::Headers hdrs = { { "Content-Type", "application/json" } };
   if (!cfg_.api_key.empty()) {
     hdrs.emplace("Authorization", "Bearer " + cfg_.api_key);
   }
@@ -65,15 +63,21 @@ ApiModel::generate_openai(const std::vector<common_chat_msg>& msgs,
   std::string full;
   json acc = json::array();
 
-  cli.Post(path, hdrs, body.dump(), "application/json",
-           [&](const char* d, size_t n) -> bool {
-             return parse_sse(std::string(d, n), full, acc, callback);
-           });
+  auto res = cli.Post(path,
+                      hdrs,
+                      body.dump(),
+                      "application/json",
+                      [&](const char* d, size_t n) -> bool {
+                        return parse_sse(std::string(d, n), full, acc, callback);
+                      });
+
+  if (!res) {
+    return make_assistant_msg(
+      "[API error " + std::to_string(-1) + "]");
+  }
 
   return build_msg(full, acc);
 }
-
-// ── Anthropic Messages API ─────────────────────────────────────────
 
 common_chat_msg
 ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
@@ -87,7 +91,8 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
   body["max_tokens"] = 4096;
 
   body["messages"] = json::array();
-  for (const auto& m : msgs) {
+  for (size_t i = 0; i < msgs.size(); ++i) {
+    const auto& m = msgs[i];
     if (m.role == MessageRole::SYSTEM) {
       body["system"] = m.content;
       continue;
@@ -112,12 +117,18 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
         jm["content"].push_back(tcu);
       }
     } else if (m.role == MessageRole::TOOL) {
+      // Merge consecutive TOOL messages into a single user message
+      jm["role"] = "user";
       jm["content"] = json::array();
-      json tr;
-      tr["type"] = "tool_result";
-      tr["tool_use_id"] = m.tool_call_id;
-      tr["content"] = m.content;
-      jm["content"].push_back(tr);
+      while (i < msgs.size() && msgs[i].role == MessageRole::TOOL) {
+        json tr;
+        tr["type"] = "tool_result";
+        tr["tool_use_id"] = msgs[i].tool_call_id;
+        tr["content"] = msgs[i].content;
+        jm["content"].push_back(tr);
+        ++i;
+      }
+      --i; // outer loop will increment
     } else {
       jm["content"] = m.content;
     }
@@ -139,7 +150,7 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
   httplib::Client cli(host);
   cli.set_read_timeout(120);
 
-  httplib::Headers hdrs = {{"Content-Type", "application/json"}};
+  httplib::Headers hdrs = { { "Content-Type", "application/json" } };
   if (!cfg_.api_key.empty()) {
     hdrs.emplace("x-api-key", cfg_.api_key);
   }
@@ -148,10 +159,19 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
   std::string full;
   json acc = json::array();
 
-  cli.Post(path, hdrs, body.dump(), "application/json",
-           [&](const char* d, size_t n) -> bool {
-             return parse_sse_anthropic(std::string(d, n), full, acc, callback);
-           });
+  auto res = cli.Post(path,
+                      hdrs,
+                      body.dump(),
+                      "application/json",
+                      [&](const char* d, size_t n) -> bool {
+                        return parse_sse_anthropic(std::string(d, n), full, acc,
+                                                  callback);
+                      });
+
+  if (!res) {
+    return make_assistant_msg(
+      "[API error " + std::to_string(-1) + "]");
+  }
 
   return build_msg(full, acc);
 }
@@ -170,31 +190,42 @@ ApiModel::split_url(const std::string& url, const std::string& suffix)
       u = u.substr(0, slash);
     }
   }
-  return {u, p};
+  return { u, p };
 }
 
 bool
-ApiModel::parse_sse(const std::string& chunk, std::string& full,
-                    json& acc, ResponseCallback& cb)
+ApiModel::parse_sse(const std::string& chunk,
+                    std::string& full,
+                    json& acc,
+                    ResponseCallback& cb)
 {
   size_t pos = 0;
   while (pos < chunk.size()) {
     auto nl = chunk.find('\n', pos);
     std::string line = chunk.substr(pos, nl - pos);
     pos = (nl == std::string::npos) ? chunk.size() : nl + 1;
-    if (line.empty() || line[0] == '\r') continue;
-    if (line.rfind("data: ", 0) != 0) continue;
+    if (line.empty() || line[0] == '\r') {
+      continue;
+    }
+    if (line.rfind("data: ", 0) != 0) {
+      continue;
+    }
     std::string data = line.substr(6);
-    if (data == "[DONE]") continue;
+    if (data == "[DONE]") {
+      continue;
+    }
     try {
       auto j = json::parse(data);
       const auto& choices = j.value("choices", json::array());
-      if (choices.empty()) continue;
+      if (choices.empty()) {
+        continue;
+      }
       const auto& delta = choices[0].value("delta", json::object());
       if (delta.contains("content") && delta["content"].is_string()) {
         std::string t = delta["content"];
         full += t;
-        if (cb) cb(t);
+        if (cb)
+          cb(t);
       }
       if (delta.contains("tool_calls")) {
         for (const auto& tc : delta["tool_calls"]) {
@@ -203,27 +234,32 @@ ApiModel::parse_sse(const std::string& chunk, std::string& full,
             acc.push_back(json::object());
           }
           auto& a = acc[idx];
-          if (tc.contains("id")) a["id"] = tc["id"];
+          if (tc.contains("id"))
+            a["id"] = tc["id"];
           if (tc.contains("function")) {
             if (tc["function"].contains("name")) {
               a["name"] = tc["function"]["name"];
             }
             if (tc["function"].contains("arguments")) {
-              if (!a.contains("arguments")) a["arguments"] = "";
+              if (!a.contains("arguments"))
+                a["arguments"] = "";
               a["arguments"] = a["arguments"].get<std::string>() +
                                tc["function"]["arguments"].get<std::string>();
             }
           }
         }
       }
-    } catch (...) {}
+    } catch (...) {
+    }
   }
   return true;
 }
 
 bool
-ApiModel::parse_sse_anthropic(const std::string& chunk, std::string& full,
-                              json& acc, ResponseCallback& cb)
+ApiModel::parse_sse_anthropic(const std::string& chunk,
+                              std::string& full,
+                              json& acc,
+                              ResponseCallback& cb)
 {
   size_t pos = 0;
   std::string current_event;
@@ -236,7 +272,8 @@ ApiModel::parse_sse_anthropic(const std::string& chunk, std::string& full,
       current_event = line.substr(7);
       continue;
     }
-    if (line.rfind("data: ", 0) != 0) continue;
+    if (line.rfind("data: ", 0) != 0)
+      continue;
     std::string data = line.substr(6);
     try {
       auto j = json::parse(data);
@@ -245,12 +282,14 @@ ApiModel::parse_sse_anthropic(const std::string& chunk, std::string& full,
         if (delta.value("type", "") == "text_delta") {
           std::string t = delta["text"];
           full += t;
-          if (cb) cb(t);
+          if (cb)
+            cb(t);
         } else if (delta.value("type", "") == "input_json_delta") {
           std::string partial = delta["partial_json"];
           if (!acc.empty()) {
             auto& a = acc.back();
-            if (!a.contains("arguments")) a["arguments"] = "";
+            if (!a.contains("arguments"))
+              a["arguments"] = "";
             a["arguments"] = a["arguments"].get<std::string>() + partial;
           }
         }
@@ -264,7 +303,8 @@ ApiModel::parse_sse_anthropic(const std::string& chunk, std::string& full,
           acc.push_back(a);
         }
       }
-    } catch (...) {}
+    } catch (...) {
+    }
   }
   return true;
 }
@@ -280,7 +320,8 @@ ApiModel::build_msg(const std::string& full, const json& acc)
     tc.tool_name = a.value("name", "");
     tc.tool_args = a.value("arguments", "{}");
     tc.tool_call_id = a.value("id", "call_0");
-    if (!tc.tool_name.empty()) msg.tool_calls.push_back(std::move(tc));
+    if (!tc.tool_name.empty())
+      msg.tool_calls.push_back(std::move(tc));
   }
   return msg;
 }

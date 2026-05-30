@@ -4,11 +4,13 @@
 #include "chat.hpp"
 #include "context.hpp"
 #include "error.hpp"
+#include "memory.hpp"
 #include "model.hpp"
 #include "session.hpp"
 #include "tool.hpp"
 
 #include <cstdlib>
+#include <locale>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -20,13 +22,27 @@
 
 namespace {
 
+class CompactCallback final : public zato::Callback
+{
+public:
+  explicit CompactCallback(zato::MemoryManager& m) : mem_(m) {}
+  void before_llm_call(std::vector<zato::common_chat_msg>& msgs) override
+  {
+    mem_.compact(msgs);
+  }
+
+private:
+  zato::MemoryManager& mem_;
+};
+
 class BashReviewCallback final : public zato::Callback
 {
 public:
   void before_tool_execution(std::string& tool_name,
                              std::string& arguments) override
   {
-    if (tool_name != "run_bash") return;
+    if (tool_name != "run_bash")
+      return;
 
     std::string cmd;
     try {
@@ -64,13 +80,13 @@ load_system_prompt_file(const std::string& path)
 int
 main(int argc, char** argv)
 {
+  std::locale::global(std::locale("")); // UTF-8 aware terminal I/O
   std::string exe_path(256, '\0');
   const ssize_t l = readlink("/proc/self/exe", exe_path.data(), 255);
   const auto exe_dir =
-    (l > 0)
-      ? std::filesystem::path(exe_path.substr(0, static_cast<size_t>(l)))
-            .parent_path()
-      : std::filesystem::current_path();
+    (l > 0) ? std::filesystem::path(exe_path.substr(0, static_cast<size_t>(l)))
+                .parent_path()
+            : std::filesystem::current_path();
   const auto sessions_dir = exe_dir / ".zato" / "sessions";
 
   const std::string default_model_path =
@@ -118,7 +134,12 @@ main(int argc, char** argv)
       use_agent = true;
       continue;
     }
-    if (arg.rfind("--", 0) == 0) continue;
+    if (arg == "--api") {
+      use_api = true;
+      continue;
+    }
+    if (arg.rfind("--", 0) == 0)
+      continue;
     if (!model_path_set) {
       model_path = arg;
       model_path_set = true;
@@ -130,15 +151,20 @@ main(int argc, char** argv)
     std::shared_ptr<zato::IModel> model;
     std::unique_ptr<zato::SessionManager> session;
     std::unique_ptr<zato::ContextManager> ctx;
+    std::unique_ptr<zato::MemoryManager> mem;
+
+    const std::string system_prompt =
+      load_system_prompt_file(system_prompt_path);
 
     if (use_api) {
       zato::ApiModel::Config api_cfg;
       api_cfg.base_url = env_url;
-      api_cfg.api_key =
-        std::string(std::getenv("ANTHROPIC_AUTH_TOKEN") ?: "");
+      api_cfg.api_key = std::string(std::getenv("ANTHROPIC_AUTH_TOKEN") ?: "");
       api_cfg.model =
         std::string(std::getenv("ANTHROPIC_MODEL") ?: "claude-sonnet-4-6");
       model = std::make_shared<zato::ApiModel>(std::move(api_cfg));
+      mem = std::make_unique<zato::MemoryManager>(
+        model, system_prompt, 48000);
 
       std::cout << zato::ansi::kBold << "Zero-Agent API mode."
                 << zato::ansi::kReset << " Model: " << zato::ansi::kCyan
@@ -153,7 +179,8 @@ main(int argc, char** argv)
       config.n_batch = 2048;
 
       int n_phys = static_cast<int>(std::thread::hardware_concurrency());
-      if (n_phys > 8) n_phys /= 2;
+      if (n_phys > 8)
+        n_phys /= 2;
       config.n_threads = n_phys;
       config.n_threads_batch = n_phys;
       config.n_gpu_layers = gpu_layers;
@@ -161,7 +188,8 @@ main(int argc, char** argv)
       auto local = zato::Model::create(model_path, config);
       model = local;
 
-      session = std::make_unique<zato::SessionManager>(local, exe_dir, session_name);
+      session =
+        std::make_unique<zato::SessionManager>(local, exe_dir, session_name);
       ctx = std::make_unique<zato::ContextManager>(local, config.n_ctx);
 
       std::cout << zato::ansi::kBold << "Zero-Agent gym ready."
@@ -171,15 +199,14 @@ main(int argc, char** argv)
                 << zato::ansi::kReset << " to quit.\n";
     }
 
-    const std::string system_prompt = load_system_prompt_file(system_prompt_path);
     std::vector<zato::common_chat_msg> messages;
 
     if (session) {
       messages = session->load();
       if (!messages.empty()) {
-        std::cout << zato::ansi::kDim << "[" << session_name
-                  << ": restored " << messages.size() << " messages]"
-                  << zato::ansi::kReset << "\n";
+        std::cout << zato::ansi::kDim << "[" << session_name << ": restored "
+                  << messages.size() << " messages]" << zato::ansi::kReset
+                  << "\n";
         if (messages[0].role == zato::MessageRole::SYSTEM)
           messages[0].content = system_prompt;
       }
@@ -193,11 +220,15 @@ main(int argc, char** argv)
                                        std::string("read_text_file"),
                                        std::string("run_bash") }) {
         auto tool = zato::ToolRegistry::create(name);
-        if (!tool) throw zato::Error("Tool not registered: " + name);
+        if (!tool)
+          throw zato::Error("Tool not registered: " + name);
         tools.push_back(std::move(tool));
       }
       std::vector<std::unique_ptr<zato::Callback>> callbacks;
       callbacks.push_back(std::make_unique<BashReviewCallback>());
+      if (use_api) {
+        callbacks.push_back(std::make_unique<CompactCallback>(*mem));
+      }
       agent = std::make_unique<zato::Agent>(
         model, std::move(tools), std::move(callbacks), system_prompt);
     } else if (messages.empty()) {
@@ -207,12 +238,21 @@ main(int argc, char** argv)
     std::string user_input;
     while (true) {
       std::cout << zato::ansi::kGreen << "You> " << zato::ansi::kReset;
-      if (!std::getline(std::cin, user_input)) break;
-      if (user_input == "exit") break;
-      if (user_input.empty()) continue;
+      if (!std::getline(std::cin, user_input))
+        break;
+      if (user_input == "exit") {
+        break;
+}
+      if (user_input.empty()) {
+        continue;
+      }
 
       messages.push_back(zato::make_user_msg(user_input));
-      if (ctx) ctx->trim(messages);
+      if (ctx) {
+        ctx->trim(messages);
+      } else if (use_api) {
+        mem->compact(messages);
+      }
 
       if (use_agent) {
         std::cout << zato::ansi::kMagenta << "AI> " << zato::ansi::kReset
@@ -233,7 +273,9 @@ main(int argc, char** argv)
         messages.push_back(response);
       }
 
-      if (session) session->save(messages);
+      if (session) {
+        session->save(messages);
+      }
     }
   } catch (const zato::Error& e) {
     std::cerr << zato::ansi::kRed << e.what() << zato::ansi::kReset << "\n";

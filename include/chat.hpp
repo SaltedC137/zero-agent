@@ -367,9 +367,9 @@ format_by_model_name(const std::vector<common_chat_msg>& messages,
 {
   if (model_path.find("llama") != std::string::npos) {
     return format_alpaca(messages);
-  } else if (model_path.find("mistral") != std::string::npos) {
+  } if (model_path.find("mistral") != std::string::npos) {
     return format_chatml(messages);
-  } else if (model_path.find("neural") != std::string::npos) {
+  } if (model_path.find("neural") != std::string::npos) {
     return format_chatml(messages);
   }
   return format_chatml(messages);
@@ -391,11 +391,11 @@ detect_and_format(const std::vector<common_chat_msg>& messages,
 
   std::string chat_template(buf_size, '\0');
   llama_model_meta_val_str(
-    model, "tokenizer.chat_template", &chat_template[0], buf_size);
+    model, "tokenizer.chat_template", chat_template.data(), buf_size);
 
   if (chat_template.find("chatml") != std::string::npos) {
     return format_chatml(messages);
-  } else if (chat_template.find("alpaca") != std::string::npos) {
+  } if (chat_template.find("alpaca") != std::string::npos) {
     return format_alpaca(messages);
   }
 
@@ -443,11 +443,11 @@ common_chat_templates_init(const llama_model* model)
 
   std::string chat_template(buf_size, '\0');
   llama_model_meta_val_str(
-    model, "tokenizer.chat_template", &chat_template[0], buf_size);
+    model, "tokenizer.chat_template", chat_template.data(), buf_size);
 
   if (chat_template.find("chatml") != std::string::npos) {
     return { .name = "chatml", .format_func = format_chatml };
-  } else if (chat_template.find("alpaca") != std::string::npos) {
+  } if (chat_template.find("alpaca") != std::string::npos) {
     return { .name = "alpaca", .format_func = format_alpaca };
   }
 

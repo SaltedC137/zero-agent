@@ -10,7 +10,6 @@
  */
 
 #include "tool.hpp"
-
 #include "error.hpp"
 
 #include <algorithm>

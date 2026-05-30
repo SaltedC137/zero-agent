@@ -48,8 +48,9 @@ public:
     while (keep_from + min_keep < messages.size()) {
       total -= estimate_msg_tokens(messages[keep_from]);
       ++keep_from;
-      if (total <= limit)
+      if (total <= limit) {
         break;
+}
     }
 
     if (keep_from > 0 && messages[0].role == MessageRole::SYSTEM) {

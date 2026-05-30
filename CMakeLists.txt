@@ -52,6 +52,7 @@ add_executable(${PROJECT_NAME}
   src/agent.cpp
   src/tool.cpp
   src/api_model.cpp
+  src/memory.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
