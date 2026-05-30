@@ -50,8 +50,11 @@ struct ModelConfig
   int n_threads = default_threads();
   int n_threads_batch = default_threads();
 
-  ggml_type cache_type_k = GGML_TYPE_F16;
-  ggml_type cache_type_v = GGML_TYPE_F16;
+  // fast load
+  ggml_type cache_type_k = GGML_TYPE_Q8_0;
+  ggml_type cache_type_v = GGML_TYPE_Q8_0;
+  llama_flash_attn_type flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+  bool offload_kqv = true;
 };
 
 class Model;

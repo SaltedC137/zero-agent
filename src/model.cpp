@@ -52,8 +52,22 @@ try_parse_tool_call_message(const std::string& text)
   std::string t = strip_code_fence_json(text);
   t = trim_copy(t);
 
-  if (t.empty() || t.front() != '{') {
+  if (t.empty()) {
     return std::nullopt;
+  }
+
+  // The model may output <think>...</think> or other text before the JSON.
+  // Search for the tool_calls marker and parse from there.
+  if (t.front() != '{') {
+    const auto marker = t.find("\"tool_calls\"");
+    if (marker == std::string::npos) { return std::nullopt;
+}
+    // Walk back to the opening brace
+    auto brace = t.rfind('{', marker);
+    if (brace == std::string::npos) { return std::nullopt;
+}
+    t = t.substr(brace);
+    t = trim_copy(t);
   }
 
   try {
@@ -113,13 +127,31 @@ std::shared_ptr<ModelWeight>
 ModelWeight::create(const std::string& model_path, int n_gpu_layers)
 {
   std ::shared_ptr<ModelWeight> weight(new ModelWeight());
-  // load model
-  ggml_backend_load_all();
+
+  llama_backend_init();
 
   llama_model_params model_params = llama_model_default_params();
-
   model_params.n_gpu_layers = n_gpu_layers;
-  model_params.main_gpu = 0; // Use GPU 0 for offloading if needed
+
+  // MoE expert tensors stay on CPU (like llama-cli --cpu-moe).
+  // Without this, each "layer" includes massive expert FFN weights
+  // that can't fit in VRAM alongside attention layers.
+  static constexpr size_t kMaxOverrides = 8;
+  static llama_model_tensor_buft_override overrides[kMaxOverrides + 1];
+  if (n_gpu_layers > 0) {
+    auto *const cpu_buft = ggml_backend_cpu_buffer_type();
+    const char* moe_patterns[] = {
+      ".*ffn_gate_exps\\.weight", ".*ffn_up_exps\\.weight",
+      ".*ffn_down_exps\\.weight", ".*ffn_gate_inp\\.weight",
+      ".*ffn_gate_shexp\\.weight", ".*ffn_up_shexp\\.weight",
+      ".*ffn_down_shexp\\.weight",
+    };
+    for (size_t i = 0; i < sizeof(moe_patterns) / sizeof(moe_patterns[0]); ++i) {
+      overrides[i] = { moe_patterns[i], cpu_buft };
+    }
+    overrides[sizeof(moe_patterns) / sizeof(moe_patterns[0])] = { nullptr, nullptr };
+    model_params.tensor_buft_overrides = overrides;
+  }
 
   weight->model_ = llama_model_load_from_file(model_path.c_str(), model_params);
 
@@ -231,15 +263,23 @@ Model::initialize_context(const ModelConfig& model_config)
 
   config_ = model_config;
 
+  const bool has_gpu = model_config.n_gpu_layers > 0;
+
   llama_context_params ctx_params = llama_context_default_params();
   ctx_params.n_ctx = static_cast<uint32_t>(std::max(1, model_config.n_ctx));
-  ctx_params.n_batch = static_cast<uint32_t>(
+  const uint32_t batch = static_cast<uint32_t>(
     model_config.n_batch > 0 ? model_config.n_batch
                              : std::min(model_config.n_ctx, 1024));
+  ctx_params.n_batch = batch;
+  ctx_params.n_ubatch = batch;
   ctx_params.n_threads = std::max(1, model_config.n_threads);
   ctx_params.n_threads_batch = std::max(1, model_config.n_threads_batch);
   ctx_params.type_k = model_config.cache_type_k;
   ctx_params.type_v = model_config.cache_type_v;
+  ctx_params.flash_attn_type = model_config.flash_attn_type;
+  ctx_params.offload_kqv = has_gpu && model_config.offload_kqv;
+  ctx_params.op_offload = has_gpu;
+  ctx_params.no_perf = true;
 
   context_ = llama_init_from_model(weight_->get_model(), ctx_params);
   if (context_ == nullptr) {

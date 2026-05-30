@@ -81,16 +81,19 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
       const size_t open = text.find(fence + "bash", pos);
       const size_t open_sh = text.find(fence + "sh", pos);
       size_t start = std::string::npos;
-      if (open != std::string::npos && open_sh != std::string::npos)
+      if (open != std::string::npos && open_sh != std::string::npos) {
         start = std::min(open, open_sh);
-      else if (open != std::string::npos)
+      } else if (open != std::string::npos) {
         start = open;
-      else
+      } else {
         start = open_sh;
-      if (start == std::string::npos) break;
+}
+      if (start == std::string::npos) { break;
+}
 
       const size_t nl = text.find('\n', start);
-      if (nl == std::string::npos) break;
+      if (nl == std::string::npos) { break;
+}
       const size_t close = text.find(fence, nl + 1);
       if (close == std::string::npos) break;
 

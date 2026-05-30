@@ -39,14 +39,18 @@ enum common_chat_format
 inline MessageRole
 role_from_string(const std::string& s)
 {
-  if (s == "user")
+  if (s == "user") {
     return MessageRole::USER;
-  if (s == "assistant")
+  }
+  if (s == "assistant") {
     return MessageRole::ASSISTANT;
-  if (s == "system")
+  }
+  if (s == "system") {
     return MessageRole::SYSTEM;
-  if (s == "tool")
+  }
+  if (s == "tool") {
     return MessageRole::TOOL;
+  }
   return MessageRole::USER;
 }
 
