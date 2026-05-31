@@ -68,7 +68,9 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
 
   static constexpr int kMaxIterations = 25;
   static constexpr size_t kMaxToolOutput = 2000;
+  static constexpr int kMaxEmptyRetries = 2;
   std::vector<common_chat_tool_call> last_tool_calls;
+  int empty_streak = 0;
 
   // Helper: extract commands from ```bash / ```sh blocks in model output.
   // When the 3B model forgets to use run_bash, we treat code blocks as
@@ -166,38 +168,32 @@ Agent::run_loop(std::vector<common_chat_msg>& messages,
       cb->after_llm_call(parsed_msg);
     }
 
-    messages.push_back(parsed_msg);
+    if (parsed_msg.tool_calls.empty() && parsed_msg.content.empty()) {
+      // Empty response → retry without pushing (preserves Anthropic alternation)
+      ++empty_streak;
+      if (empty_streak >= kMaxEmptyRetries) {
+        messages.push_back(parsed_msg);
+      }
+      continue;
+    }
+    empty_streak = 0;
 
-    // If model returned text without tool calls, check for implicit
-    // ```bash blocks and treat them as run_bash calls automatically.
+    // Inject implicit ```bash tool calls BEFORE pushing to history
     if (parsed_msg.tool_calls.empty()) {
       const auto bash_cmds = find_bash_blocks(parsed_msg.content);
-      if (!bash_cmds.empty()) {
-        for (size_t ci = 0; ci < bash_cmds.size(); ++ci) {
-          json args;
-          args["command"] = bash_cmds[ci];
-          const std::string call_id =
-            "implicit_" + std::to_string(iter) + "_" + std::to_string(ci);
-          ToolResult result = execute_tool("run_bash", args.dump());
-          common_chat_msg tmsg;
-          tmsg.role = MessageRole::TOOL;
-          tmsg.tool_call_id = call_id;
-          if (result.has_error()) {
-            json ej;
-            ej["error"] = result.error().message;
-            tmsg.content = ej.dump();
-          } else {
-            std::string out = result.output();
-            if (out.size() > kMaxToolOutput) {
-              out.resize(kMaxToolOutput);
-              out += "\n... [truncated]";
-            }
-            tmsg.content = std::move(out);
-          }
-          messages.push_back(tmsg);
-        }
-        continue; // loop back so model can respond to tool results
+      for (size_t ci = 0; ci < bash_cmds.size(); ++ci) {
+        common_chat_tool_call tc;
+        tc.tool_name = "run_bash";
+        tc.tool_args = R"({"command":")" + bash_cmds[ci] + R"("})";
+        tc.tool_call_id =
+          "implicit_" + std::to_string(iter) + "_" + std::to_string(ci);
+        parsed_msg.tool_calls.push_back(std::move(tc));
       }
+    }
+    messages.push_back(parsed_msg);
+
+    // If model returned text without tool calls, return to user
+    if (parsed_msg.tool_calls.empty()) {
 
       std::string response = parsed_msg.content;
       for (const auto& cb : callbacks_) {

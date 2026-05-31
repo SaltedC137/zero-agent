@@ -183,6 +183,76 @@ public:
   std::string get_name() const override { return "read_text_file"; }
 };
 
+class WriteFileTool final : public Tool
+{
+public:
+  common_chat_tool get_definition() const override
+  {
+    return {
+      .name = "write_file",
+      .description = "Write content to a file (relative path). "
+                     "Overwrites existing files. Use for saving code, "
+                     "configs, or any text content. No shell escaping needed.",
+      .params = { { .name = "path",
+                    .type = "string",
+                    .description = "Relative file path, e.g. 'src/main.cpp'.",
+                    .required = true },
+                  { .name = "content",
+                    .type = "string",
+                    .description = "Text content to write to the file.",
+                    .required = true } }
+    };
+  }
+
+  std::string execute(const json& arguments) override
+  {
+    const std::string tool_name = get_name();
+
+    if (!arguments.contains("path") || !arguments.at("path").is_string()) {
+      throw ToolArgumentError(tool_name, "'path' must be a string");
+    }
+    if (!arguments.contains("content") ||
+        !arguments.at("content").is_string()) {
+      throw ToolArgumentError(tool_name, "'content' must be a string");
+    }
+
+    const std::string path = arguments.at("path").get<std::string>();
+    if (path.empty()) {
+      throw ToolArgumentError(tool_name, "'path' must not be empty");
+    }
+    if (path.rfind('/', 0) == 0) {
+      throw ToolArgumentError(tool_name, "absolute paths are not allowed");
+    }
+    if (path.find("..") != std::string::npos) {
+      throw ToolArgumentError(tool_name, "'..' path traversal is not allowed");
+    }
+
+    const std::string content = arguments.at("content").get<std::string>();
+
+    // Ensure parent directory exists
+    auto parent = std::filesystem::path(path).parent_path();
+    if (!parent.empty()) {
+      std::error_code ec;
+      std::filesystem::create_directories(parent, ec);
+    }
+
+    std::ofstream file(path, std::ios::out | std::ios::trunc);
+    if (!file.is_open()) {
+      throw ToolArgumentError(tool_name, "failed to write: " + path);
+    }
+
+    file << content;
+    file.close();
+
+    json out;
+    out["path"] = path;
+    out["bytes_written"] = content.size();
+    return out.dump();
+  }
+
+  std::string get_name() const override { return "write_file"; }
+};
+
 class RunBashTool final : public Tool
 {
 public:
@@ -351,6 +421,8 @@ struct BuiltinToolRegistrar
       "add", []() { return std::make_unique<AddTool>(); });
     (void)ToolRegistry::register_factory(
       "read_text_file", []() { return std::make_unique<ReadTextFileTool>(); });
+    (void)ToolRegistry::register_factory(
+      "write_file", []() { return std::make_unique<WriteFileTool>(); });
     (void)ToolRegistry::register_factory(
       "run_bash", []() { return std::make_unique<RunBashTool>(); });
   }

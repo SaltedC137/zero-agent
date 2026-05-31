@@ -1,5 +1,6 @@
 #include "api.hpp"
 
+#include <fstream>
 #include <httplib.h>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -92,6 +93,11 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
   body["max_tokens"] = 4096;
 
   body["messages"] = json::array();
+  // Debug: dump message history structure
+  for (size_t i = 0; i < msgs.size(); ++i)
+    std::cerr << "[" << i << "] role=" << role_to_string(msgs[i].role)
+              << " tool_id=" << msgs[i].tool_call_id
+              << " tool_calls=" << msgs[i].tool_calls.size() << "\n";
   bool has_system = false;
   for (size_t i = 0; i < msgs.size(); ++i) {
     const auto& m = msgs[i];
@@ -170,6 +176,10 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
   json acc = json::array();
 
   std::string raw_sse;
+  std::cerr << "===="
+            << "\n[request]\n"
+            << body.dump(2) << "\n====\n"
+            << std::flush;
   auto res = cli.Post(path,
                       hdrs,
                       body.dump(),
@@ -188,10 +198,14 @@ ApiModel::generate_anthropic(const std::vector<common_chat_msg>& msgs,
   }
 
   auto msg = build_msg(full, acc);
-  if (msg.content.empty() && msg.tool_calls.empty() && !raw_sse.empty()) {
-    std::cerr << "  [empty] SSE:"
-              << raw_sse.substr(0, std::min(raw_sse.size(), size_t(300)))
-              << "\n";
+  // Always trace the last SSE response for debugging
+  {
+    std::ofstream dump("zato_sse_dump.txt", std::ios::trunc);
+    dump << "content_len=" << msg.content.size()
+         << " tool_calls=" << msg.tool_calls.size()
+         << " sse_len=" << raw_sse.size() << "\ncontent=[" << msg.content << "]"
+         << "\nSSE:\n"
+         << raw_sse << "\n";
   }
   return msg;
 }
@@ -310,7 +324,8 @@ ApiModel::parse_sse_anthropic(const std::string& chunk,
       const auto& delta = j.value("delta", json::object());
 
       if (type == "content_block_delta") {
-        if (delta.value("type", "") == "text_delta") {
+        const auto dt = delta.value("type", "");
+        if (dt == "text_delta") {
           std::string t = delta.value("text", "");
           if (!t.empty()) {
             full += t;
@@ -318,7 +333,18 @@ ApiModel::parse_sse_anthropic(const std::string& chunk,
               cb(t);
             }
           }
-        } else if (delta.value("type", "") == "input_json_delta") {
+        } else if (dt == "thinking_delta") {
+          // DeepSeek reasoning models: thinking is the visible response
+          std::string t = delta.value("thinking", "");
+          if (!t.empty()) {
+            full += t;
+            if (cb) {
+              cb(t);
+            }
+          }
+        } else if (dt == "signature_delta") {
+          // DeepSeek signature — ignore
+        } else if (dt == "input_json_delta") {
           std::string partial = delta.value("partial_json", "");
           if (!partial.empty() && !acc.empty()) {
             auto& a = acc.back();
@@ -330,11 +356,18 @@ ApiModel::parse_sse_anthropic(const std::string& chunk,
         }
       } else if (type == "content_block_start") {
         const auto& block = j.value("content_block", json::object());
-        if (block.value("type", "") == "tool_use") {
+        if (block.value("type", "") == "thinking") {
+          // DeepSeek reasoning block — content comes via thinking_delta
+        } else if (block.value("type", "") == "tool_use") {
           json a;
           a["name"] = block.value("name", "");
           a["id"] = block.value("id", "");
-          a["arguments"] = "";
+          // Capture complete input if sent all at once (DeepSeek does this)
+          // DeepSeek sends input:{} initially, then streams deltas.
+          // Don't capture {} — let input_json_delta build from scratch.
+          auto in = block.value("input", json::object());
+          a["arguments"] =
+            (in.empty() || in == json::object()) ? "" : in.dump();
           acc.push_back(a);
         }
       } else if (type == "message_stop" || type == "message_delta") {
@@ -355,7 +388,7 @@ ApiModel::build_msg(const std::string& full, const json& acc)
   msg.content = full;
   // Never return empty — fallback for silent API failures
   if (msg.content.empty() && acc.empty()) {
-    msg.content = "[no response — context may be too long, try /clear]";
+    msg.content = ""; // don't save fallback text to history
   }
   for (const auto& a : acc) {
     common_chat_tool_call tc;

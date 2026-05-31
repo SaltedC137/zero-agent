@@ -222,6 +222,7 @@ main(int argc, char** argv)
       for (const std::string& name : { std::string("echo"),
                                        std::string("add"),
                                        std::string("read_text_file"),
+                                       std::string("write_file"),
                                        std::string("run_bash") }) {
         auto tool = zato::ToolRegistry::create(name);
         if (!tool) {

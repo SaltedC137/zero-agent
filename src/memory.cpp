@@ -67,6 +67,15 @@ MemoryManager::compact(std::vector<common_chat_msg>& messages)
   mem.content = "[Conversation memory]: " + response.content;
   messages.insert(messages.begin() + static_cast<long>(sys_end), mem);
 
+  // Remove orphan TOOL messages (tool_results without tool_use)
+  for (size_t i = 1; i < messages.size(); ++i) {
+    if (messages[i].role == MessageRole::TOOL &&
+        messages[i - 1].role != MessageRole::ASSISTANT) {
+      messages.erase(messages.begin() + static_cast<long>(i));
+      --i;
+    }
+  }
+
   // Ensure system prompt stays first
   if (messages[0].content != system_prompt_) {
     messages.insert(messages.begin(), make_system_msg(system_prompt_));
