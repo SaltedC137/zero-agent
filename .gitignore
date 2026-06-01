@@ -116,3 +116,4 @@ latex
 # model files
 model
 zato.err
+zato_see_dump.txt
