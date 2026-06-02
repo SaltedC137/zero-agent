@@ -115,5 +115,8 @@ latex
 
 # model files
 model
+
+# debug.files
+
 zato.err
 zato_see_dump.txt
